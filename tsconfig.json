@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ES2020",
+    "moduleResolution": "node",
+    "outDir": "dist",
+    "rootDir": "./",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@config/*": ["config/*"],
+      "@scanner/*": ["src/scanner/*"],
+      "@metadata/*": ["src/metadata/*"],
+      "@cover/*": ["src/cover/*"],
+      "@utils/*": ["src/utils/*"]
+    }
+  },
+  "include": ["src", "index.ts", "config"],
+  "exclude": ["dist", "node_modules"]
+}

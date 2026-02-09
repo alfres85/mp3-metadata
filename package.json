@@ -1,0 +1,27 @@
+{
+  "name": "mp3-auto-cover",
+  "version": "1.0.0",
+  "description": "Tool that scans MP3 files, reads ID3 tags, fetches missing covers using MusicBrainz/CoverArtArchive/DuckDuckGo, and embeds them.",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon --watch src --watch index.ts --exec node --loader ts-node/esm index.ts",
+    "recognize": "nodemon --watch src --watch index.ts --exec node --loader ts-node/esm index.ts -- --recognize",
+    "build": "tsc --project tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.8",
+    "node-id3": "^0.2.1",
+    "recursive-readdir": "^2.2.3",
+    "p-queue": "^7.4.1",
+    "sharp": "^0.33.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "@types/node": "^20.11.24",
+    "@types/recursive-readdir": "^2.2.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
+  }
+}
