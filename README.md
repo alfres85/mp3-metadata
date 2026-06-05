@@ -16,7 +16,7 @@ A Node/TypeScript tool that scans folders, detects MP3 files without covers, ext
   - **Covers**: MusicBrainz/CoverArtArchive → iTunes (High-quality 600x600 artwork) → DuckDuckGo (Final fallback)
 - **ID3 Management**: Full support for reading/writing ID3v2 tags.
 - **Local Cover Cache**: Saves downloaded images locally to speed up subsequent runs.
-- **Audio Fingerprinting**: Integration with **ACRCloud** to identify music by listening to audio snippets, with automatic fallback to **AcoustID** (Chromaprint) when ACRCloud hits its limit.
+- **Audio Fingerprinting**: Integration with **Shazam API** first, then **ACRCloud**, with automatic fallback to **AcoustID** (Chromaprint) before filename parsing.
 - **Duplicate Detection**: Fast standalone duplicate scan based on local metadata, with three action modes: log, delete, or move.
 - **Smart File Renaming**: Automatically renames files to a normalized `Title - Artist` format with collision handling.
 - **Concurrency**: Processes up to **3 files simultaneously** by default using `p-queue`. Configurable via `--concurrency`.
@@ -66,7 +66,7 @@ This executes: `node dist/index.js`
 node dist/index.js ./my/music/folder
 ```
 
-If no parameter is provided, it defaults to `./music`.
+If no parameter is provided, the tool starts an interactive console setup where you can choose the target folder and action mode.
 
 ### **Advanced features (Parameters)**
 
@@ -74,9 +74,10 @@ The tool supports several flags to customize its behavior:
 
 | Flag             | Alias        | Description                                                                                                                                                                                                       |
 | :--------------- | :----------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--recognize`    | `-recognize` | **Audio Recognition**: Uses [ACRCloud](https://www.acrcloud.com/) to identify music by listening to a 12s snippet. If ACRCloud fails or hits its rate limit, automatically falls back to **AcoustID** (Chromaprint fingerprinting). |
+| `--recognize`    | `-recognize` | **Audio Recognition**: Uses Shazam API via a Node/WASM wrapper first, then [ACRCloud](https://www.acrcloud.com/), then **AcoustID** (Chromaprint fingerprinting), then filename parsing. |
 | `--force`        | `-force`     | **Force Mode**: Re-processes files even if they already have embedded cover art. Useful for replacing low-quality covers.                                                                                         |
 | `--rename`       | `-rename`    | **Auto Rename**: Renames the file to `Title - Artist.mp3` after resolving metadata. Cleans illegal characters.                                                                                                    |
+| `--interactive`  | `-interactive` | **Interactive Mode**: Opens a console setup to choose the target folder, action mode, force/rename options, and concurrency. Also starts automatically when no parameters are provided. |
 | `--concurrency <num>` | `-concurrency <num>` | **Concurrency**: Number of files to process simultaneously. Defaults to `3`. Increase to `4` or `5` on fast networks for a speed boost. |
 | `--dedup-standalone-log`    | `-dedup-standalone-log` | **Standalone Dedup (Log)**: Fast standalone pass that only checks for duplicate tracks based on local ID3 metadata. Skips all cover/metadata fetching. Logs duplicates to `duplicates.txt`. |
 | `--dedup-standalone-delete` | `-dedup-standalone-delete` | **Standalone Dedup (Delete)**: Same fast standalone pass, but permanently **deletes** duplicate files. The first copy encountered is always kept. Logs deletions to `duplicates.txt`. Use with caution. |
@@ -86,7 +87,17 @@ The tool supports several flags to customize its behavior:
 
 ## ▶️ Examples
 
-**1. Recognize music using audio fingerprinting (ACRCloud → AcoustID fallback):**
+**1. Interactive setup:**
+
+```bash
+# Interactive console setup
+node dist/index.js
+
+# Or force interactive mode even when you want to be explicit
+node dist/index.js --interactive
+```
+
+**2. Recognize music using audio fingerprinting (Shazam → ACRCloud → AcoustID fallback):**
 
 ```bash
 # Using the npm dev script
@@ -96,15 +107,15 @@ npm run dev -- --recognize ./my/songs
 node dist/index.js --recognize ./my/songs
 ```
 
-> **Note:** ACRCloud requires `ACRCLOUD_ACCESS_KEY`, `ACRCLOUD_ACCESS_SECRET`, and optionally `ACRCLOUD_HOST` in your environment. AcoustID fallback requires `ACOUSTID_API_KEY` in your environment and uses the bundled `bin/fpcalc.exe` to generate fingerprints.
+> **Note:** Shazam recognition requires no credentials. ACRCloud requires `ACRCLOUD_ACCESS_KEY`, `ACRCLOUD_ACCESS_SECRET`, and optionally `ACRCLOUD_HOST` in your environment. AcoustID fallback requires `ACOUSTID_API_KEY` in your environment and uses the bundled `bin/fpcalc.exe` to generate fingerprints.
 
-**2. Force update covers for all files:**
+**3. Force update covers for all files:**
 
 ```bash
 node dist/index.js --force ./my/songs
 ```
 
-**3. Recognize and Force combined:**
+**4. Recognize and Force combined:**
 
 ```bash
 node dist/index.js --recognize --force ./my/songs
@@ -112,25 +123,25 @@ node dist/index.js --recognize --force ./my/songs
 
 This will fingerprint every song, find accurate metadata, and embed a fresh cover for every file, even if they already have one.
 
-**4. Process 5 files at once for maximum speed:**
+**5. Process 5 files at once for maximum speed:**
 
 ```bash
 node dist/index.js --concurrency 5 ./my/songs
 ```
 
-**5. Find and log duplicates without touching any files:**
+**6. Find and log duplicates without touching any files:**
 
 ```bash
 node dist/index.js --dedup-standalone-log ./my/songs
 ```
 
-**6. Move all duplicates to a `duplicates/` folder for manual review:**
+**7. Move all duplicates to a `duplicates/` folder for manual review:**
 
 ```bash
 node dist/index.js --dedup-standalone-move ./my/songs
 ```
 
-**7. Permanently delete duplicates (keeps the first copy of each track):**
+**8. Permanently delete duplicates (keeps the first copy of each track):**
 
 ```bash
 node dist/index.js --dedup-standalone-delete ./my/songs
@@ -189,9 +200,10 @@ If the file is missing Artist or Album tags, the tool parses the filename and se
 
 ### 4. **Audio Recognition Pipeline (with `--recognize`)**
 
-1. **ACRCloud**: Extracts a 12-second audio snippet via `ffmpeg` and sends it to ACRCloud for identification.
-2. **AcoustID** *(automatic fallback)*: If ACRCloud fails or hits its rate limit, the tool uses the bundled `fpcalc.exe` (Chromaprint) to generate a local audio fingerprint and queries the free AcoustID API using `ACOUSTID_API_KEY`.
-3. **Filename Parsing** *(final fallback)*: If both audio recognition services fail, the tool falls back to parsing the filename and searching MusicBrainz/iTunes by text.
+1. **Shazam API**: Extracts a 12-second audio snippet via `ffmpeg` starting at 60s to avoid spoken intros and generic opening beats. If that snippet cannot be created, it falls back to 15s and then 0s. It then generates a local signature through the Node/WASM Shazam wrapper and queries Shazam's backend.
+2. **ACRCloud**: If Shazam fails or returns no match, extracts a 12-second audio snippet via `ffmpeg` and sends it to ACRCloud for identification.
+3. **AcoustID**: If ACRCloud fails or hits its rate limit, the tool uses the bundled `fpcalc.exe` (Chromaprint) to generate a local audio fingerprint and queries the free AcoustID API using `ACOUSTID_API_KEY`.
+4. **Filename Parsing** *(final fallback)*: If all audio recognition services fail, the tool falls back to parsing the filename and searching MusicBrainz/iTunes by text.
 
 ### 5. **Cover Resolution Pipeline**
 
@@ -232,6 +244,7 @@ node dist/index.js --concurrency 5 ./my/songs
 | `ACRCLOUD_ACCESS_SECRET` | For `--recognize` | Your ACRCloud project access secret.             |
 | `ACRCLOUD_HOST`        | Optional | ACRCloud endpoint. Defaults to `identify-us-west-2.acrcloud.com`. |
 | `ACOUSTID_API_KEY`     | For `--recognize` | Your AcoustID application API key. Get one for free at [acoustid.org/new-application](https://acoustid.org/new-application). Used as a fallback when ACRCloud fails. |
+| `SHAZAM_LANGUAGE`      | Optional | Shazam recognition language/region. Defaults to `es-US` for stronger Spanish/Latino matching. |
 
 > **Tip:** You can set these in a `.env` file or export them in your shell before running the tool.
 

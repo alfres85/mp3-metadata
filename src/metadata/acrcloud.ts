@@ -6,6 +6,7 @@ import process from 'node:process';
 import crypto from 'node:crypto';
 import axios from 'axios';
 import { log } from '../utils/logger.js';
+import { isUsableMetadata } from './metadataValidation.js';
 
 export interface ACRCloudMetadata {
   artist: string;
@@ -63,11 +64,17 @@ export async function recognizeFromAudio(filePath: string): Promise<ACRCloudMeta
 
     if (response.data.status.code === 0 && response.data.metadata?.music?.[0]) {
       const music = response.data.metadata.music[0];
-      return {
+      const metadata = {
         artist: music.artists?.[0]?.name || 'Unknown Artist',
         title: music.title || 'Unknown Title',
         album: music.album?.name || '',
       };
+      if (!isUsableMetadata(metadata)) {
+        log.warn('ACRCloud returned incomplete placeholder metadata; continuing fallback chain.');
+        return null;
+      }
+
+      return metadata;
     } else {
       const errorMsg = response.data.status?.msg || 'Unknown error';
       log.warn(`ACRCloud recognition failed: ${errorMsg}`);

@@ -5,6 +5,7 @@ import axios from 'axios';
 import fs from 'node:fs';
 import { log } from '../utils/logger.js';
 import type { ACRCloudMetadata } from './acrcloud.js';
+import { isUsableMetadata } from './metadataValidation.js';
 
 
 
@@ -65,7 +66,13 @@ export async function recognizeFromAcoustID(filePath: string): Promise<ACRCloudM
           album = recording.releasegroups[0].title || '';
         }
         
-        return { artist, title, album };
+        const metadata = { artist, title, album };
+        if (!isUsableMetadata(metadata)) {
+          log.warn('AcoustID returned incomplete placeholder metadata; continuing fallback chain.');
+          return null;
+        }
+
+        return metadata;
       }
     }
     

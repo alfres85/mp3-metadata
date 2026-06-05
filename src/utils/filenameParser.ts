@@ -19,6 +19,7 @@ export function parseFilename(filePath: string): ParsedFilename {
     .replace(/\[LETRA\]/gi, '')
     .replace(/\(Lyrics\)/gi, '')
     .replace(/\[Lyrics\]/gi, '')
+    .replace(/\s\(\d+\)$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 

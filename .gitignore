@@ -5,3 +5,4 @@ cache/
 .env
 duplicates.txt
 error.log
+unknown_artist.txt
