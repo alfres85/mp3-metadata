@@ -48,9 +48,39 @@ function applyRename(
   return file;
 }
 
+function hasNumberedDuplicateSuffix(file: string): boolean {
+  const baseName = path.basename(file, path.extname(file));
+  return /\s\(\d+\)$/.test(baseName);
+}
+
+function moveDuplicateToFolder(file: string, target: string): string | null {
+  const dupDir = path.join(target, 'duplicates');
+  if (!fs.existsSync(dupDir)) {
+    fs.mkdirSync(dupDir, { recursive: true });
+  }
+
+  const baseName = path.basename(file, path.extname(file));
+  const ext = path.extname(file);
+  let targetPath = path.join(dupDir, `${baseName}${ext}`);
+  let counter = 1;
+
+  while (fs.existsSync(targetPath)) {
+    targetPath = path.join(dupDir, `${baseName} (${counter})${ext}`);
+    counter++;
+  }
+
+  try {
+    fs.renameSync(file, targetPath);
+    return targetPath;
+  } catch (err) {
+    log.error(`Failed to move duplicate: ${file}`);
+    return null;
+  }
+}
+
 async function run(
   processedFiles: Set<string>,
-  seenTracks: Set<string>,
+  seenTracks: Map<string, string>,
   target: string,
   useRecognition: boolean,
   force: boolean,
@@ -72,7 +102,8 @@ async function run(
     const checkDuplicate = (artist: string, title: string) => {
       if (!(dedupStandaloneLog || dedupStandaloneDelete || dedupStandaloneMove)) return false;
       const trackKey = `${artist.toLowerCase()} - ${title.toLowerCase()}`;
-      if (seenTracks.has(trackKey)) {
+      const keptFile = seenTracks.get(trackKey);
+      if (keptFile) {
         if (dedupStandaloneDelete) {
           log.warn(`Duplicate detected and deleted: ${file} (${artist} - ${title})`);
           fs.appendFileSync('duplicates.txt', `DELETED: ${file} (${artist} - ${title})\n`);
@@ -82,24 +113,21 @@ async function run(
             log.error(`Failed to delete duplicate: ${file}`);
           }
         } else if (dedupStandaloneMove) {
+          if (hasNumberedDuplicateSuffix(keptFile) && !hasNumberedDuplicateSuffix(file)) {
+            log.warn(`Duplicate detected; keeping clean filename in main folder: ${file} (${artist} - ${title})`);
+            const targetPath = moveDuplicateToFolder(keptFile, target);
+            if (targetPath) {
+              fs.appendFileSync('duplicates.txt', `MOVED: ${keptFile} -> ${targetPath} (kept ${file})\n`);
+              processedFiles.add(keptFile);
+              seenTracks.set(trackKey, file);
+            }
+            return false;
+          }
+
           log.warn(`Duplicate detected and moved: ${file} (${artist} - ${title})`);
-          const dupDir = path.join(target, 'duplicates');
-          if (!fs.existsSync(dupDir)) {
-            fs.mkdirSync(dupDir, { recursive: true });
-          }
-          let baseName = path.basename(file, path.extname(file));
-          let ext = path.extname(file);
-          let targetPath = path.join(dupDir, `${baseName}${ext}`);
-          let counter = 1;
-          while (fs.existsSync(targetPath)) {
-            targetPath = path.join(dupDir, `${baseName} (${counter})${ext}`);
-            counter++;
-          }
-          try {
-            fs.renameSync(file, targetPath);
+          const targetPath = moveDuplicateToFolder(file, target);
+          if (targetPath) {
             fs.appendFileSync('duplicates.txt', `MOVED: ${file} -> ${targetPath}\n`);
-          } catch (err) {
-            log.error(`Failed to move duplicate: ${file}`);
           }
         } else {
           log.warn(`Duplicate detected: ${file} (${artist} - ${title})`);
@@ -108,7 +136,7 @@ async function run(
         processedFiles.add(file);
         return true;
       }
-      seenTracks.add(trackKey);
+      seenTracks.set(trackKey, file);
       return false;
     };
 
@@ -244,7 +272,7 @@ async function main() {
 
   const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
   const processedFiles = new Set<string>();
-  const seenTracks = new Set<string>();
+  const seenTracks = new Map<string, string>();
 
   if (dedupStandaloneLog || dedupStandaloneDelete || dedupStandaloneMove) {
     fs.appendFileSync('duplicates.txt', `\n--- Duplicate Scan Started at ${new Date().toISOString()} ---\n`);

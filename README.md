@@ -80,7 +80,7 @@ The tool supports several flags to customize its behavior:
 | `--concurrency <num>` | `-concurrency <num>` | **Concurrency**: Number of files to process simultaneously. Defaults to `3`. Increase to `4` or `5` on fast networks for a speed boost. |
 | `--dedup-standalone-log`    | `-dedup-standalone-log` | **Standalone Dedup (Log)**: Fast standalone pass that only checks for duplicate tracks based on local ID3 metadata. Skips all cover/metadata fetching. Logs duplicates to `duplicates.txt`. |
 | `--dedup-standalone-delete` | `-dedup-standalone-delete` | **Standalone Dedup (Delete)**: Same fast standalone pass, but permanently **deletes** duplicate files. The first copy encountered is always kept. Logs deletions to `duplicates.txt`. Use with caution. |
-| `--dedup-standalone-move`   | `-dedup-standalone-move` | **Standalone Dedup (Move)**: Same fast standalone pass, but **moves** duplicates into a `duplicates/` subfolder inside your target directory instead of deleting them. Logs moves to `duplicates.txt`. |
+| `--dedup-standalone-move`   | `-dedup-standalone-move` | **Standalone Dedup (Move)**: Same fast standalone pass, but **moves** duplicates into a `duplicates/` subfolder inside your target directory instead of deleting them. When duplicate filenames differ only by a trailing number like `(1)`, the unnumbered filename is kept in the main folder. Logs moves to `duplicates.txt`. |
 
 ---
 
@@ -180,6 +180,7 @@ When using any `--dedup-standalone-*` flag, the tool runs a fast metadata-only s
 - Identifies duplicates by comparing `artist - title` keys (case-insensitive).
 - The **first** copy of every track is always kept safe.
 - Subsequent copies are either **logged**, **deleted**, or **moved** to a `duplicates/` folder, depending on the flag used.
+- In move mode, if one duplicate filename ends with a number like `(1)`, `(2)`, etc. and another does not, the unnumbered filename remains in the main folder.
 - All actions are appended to `duplicates.txt` in the current working directory.
 
 ### 3. **Metadata Recovery**
