@@ -9,6 +9,7 @@ import { recognizeFromAudio } from './src/metadata/acrcloud.js';
 import fs from 'fs';
 import path from 'node:path';
 import process from 'node:process';
+import PQueue from 'p-queue';
 
 function applyRename(
   file: string,
@@ -49,20 +50,78 @@ function applyRename(
 
 async function run(
   processedFiles: Set<string>,
+  seenTracks: Set<string>,
   target: string,
   useRecognition: boolean,
   force: boolean,
   rename: boolean,
+  dedupStandaloneLog: boolean,
+  dedupStandaloneDelete: boolean,
+  dedupStandaloneMove: boolean,
+  concurrency: number,
 ) {
   log.info(`Scanning: ${target}`);
   const files = await scanForMp3(target);
   log.info(`Found ${files.length} MP3 files`);
 
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    if (processedFiles.has(file)) continue;
+  const queue = new PQueue({ concurrency });
+
+  const tasks = files.map((file, i) => async () => {
+    if (processedFiles.has(file)) return;
+
+    const checkDuplicate = (artist: string, title: string) => {
+      if (!(dedupStandaloneLog || dedupStandaloneDelete || dedupStandaloneMove)) return false;
+      const trackKey = `${artist.toLowerCase()} - ${title.toLowerCase()}`;
+      if (seenTracks.has(trackKey)) {
+        if (dedupStandaloneDelete) {
+          log.warn(`Duplicate detected and deleted: ${file} (${artist} - ${title})`);
+          fs.appendFileSync('duplicates.txt', `DELETED: ${file} (${artist} - ${title})\n`);
+          try {
+            fs.unlinkSync(file);
+          } catch (err) {
+            log.error(`Failed to delete duplicate: ${file}`);
+          }
+        } else if (dedupStandaloneMove) {
+          log.warn(`Duplicate detected and moved: ${file} (${artist} - ${title})`);
+          const dupDir = path.join(target, 'duplicates');
+          if (!fs.existsSync(dupDir)) {
+            fs.mkdirSync(dupDir, { recursive: true });
+          }
+          let baseName = path.basename(file, path.extname(file));
+          let ext = path.extname(file);
+          let targetPath = path.join(dupDir, `${baseName}${ext}`);
+          let counter = 1;
+          while (fs.existsSync(targetPath)) {
+            targetPath = path.join(dupDir, `${baseName} (${counter})${ext}`);
+            counter++;
+          }
+          try {
+            fs.renameSync(file, targetPath);
+            fs.appendFileSync('duplicates.txt', `MOVED: ${file} -> ${targetPath}\n`);
+          } catch (err) {
+            log.error(`Failed to move duplicate: ${file}`);
+          }
+        } else {
+          log.warn(`Duplicate detected: ${file} (${artist} - ${title})`);
+          fs.appendFileSync('duplicates.txt', `LOGGED: ${file} (${artist} - ${title})\n`);
+        }
+        processedFiles.add(file);
+        return true;
+      }
+      seenTracks.add(trackKey);
+      return false;
+    };
 
     let tag = readTag(file);
+
+    if (tag.artist && tag.title) {
+      if (checkDuplicate(tag.artist, tag.title)) return;
+    }
+
+    if (dedupStandaloneLog || dedupStandaloneDelete || dedupStandaloneMove) {
+      processedFiles.add(file);
+      return;
+    }
 
     if (!force && !useRecognition && tag.image && tag.artist && tag.album) {
       log.info(`(${i + 1}/${files.length}) Skipping: ${file} (Metadata and cover already exist)`);
@@ -70,7 +129,7 @@ async function run(
         applyRename(file, tag.artist, tag.title, processedFiles);
       }
       processedFiles.add(file);
-      continue;
+      return;
     }
 
     log.info(`(${i + 1}/${files.length}) Processing: ${file}`);
@@ -81,6 +140,12 @@ async function run(
       if (useRecognition) {
         log.info('Attempting audio recognition via ACRCloud...');
         webMetadata = await recognizeFromAudio(file);
+        
+        if (!webMetadata) {
+          log.warn('ACRCloud failed or reached limit. Falling back to AcoustID...');
+          const { recognizeFromAcoustID } = await import('./src/metadata/acoustid.js');
+          webMetadata = await recognizeFromAcoustID(file);
+        }
       }
 
       if (!webMetadata && !tag.artist) {
@@ -111,6 +176,9 @@ async function run(
         });
         // Re-read tags after writing
         tag = readTag(file);
+        if (tag.artist && tag.title) {
+          if (checkDuplicate(tag.artist, tag.title)) return;
+        }
       } else if (useRecognition) {
         log.warn('Audio recognition failed');
       }
@@ -122,7 +190,7 @@ async function run(
         applyRename(file, tag.artist, tag.title, processedFiles);
       }
       processedFiles.add(file);
-      continue;
+      return;
     }
 
     if (!force && tag.image) {
@@ -131,7 +199,7 @@ async function run(
         applyRename(file, tag.artist, tag.title, processedFiles);
       }
       processedFiles.add(file);
-      continue;
+      return;
     }
 
     const coverPath = await resolveCover(tag.artist, tag.album);
@@ -141,7 +209,7 @@ async function run(
         applyRename(file, tag.artist, tag.title, processedFiles);
       }
       processedFiles.add(file);
-      continue;
+      return;
     }
 
     const img = fs.readFileSync(coverPath);
@@ -152,7 +220,9 @@ async function run(
       applyRename(file, tag.artist, tag.title, processedFiles);
     }
     processedFiles.add(file);
-  }
+  });
+
+  await queue.addAll(tasks);
 }
 
 async function main() {
@@ -160,10 +230,25 @@ async function main() {
   const useRecognition = args.includes('--recognize') || args.includes('-recognize');
   const force = args.includes('--force') || args.includes('-force');
   const rename = args.includes('--rename') || args.includes('-rename');
-  const target = args.find((arg: string) => !arg.startsWith('-')) || './music';
+  const dedupStandaloneLog = args.includes('--dedup-standalone-log') || args.includes('-dedup-standalone-log');
+  const dedupStandaloneDelete = args.includes('--dedup-standalone-delete') || args.includes('-dedup-standalone-delete');
+  const dedupStandaloneMove = args.includes('--dedup-standalone-move') || args.includes('-dedup-standalone-move');
+
+  let concurrency = 3;
+  const concurrencyIndex = args.indexOf('--concurrency');
+  if (concurrencyIndex !== -1 && args[concurrencyIndex + 1]) {
+    concurrency = parseInt(args[concurrencyIndex + 1], 10);
+  }
+
+  const target = args.find((arg: string) => !arg.startsWith('-') && arg !== args[concurrencyIndex + 1]) || './music';
 
   const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
   const processedFiles = new Set<string>();
+  const seenTracks = new Set<string>();
+
+  if (dedupStandaloneLog || dedupStandaloneDelete || dedupStandaloneMove) {
+    fs.appendFileSync('duplicates.txt', `\n--- Duplicate Scan Started at ${new Date().toISOString()} ---\n`);
+  }
 
   if (useRecognition) {
     log.info('Running in recognition mode using ACRCloud');
@@ -174,10 +259,28 @@ async function main() {
   if (rename) {
     log.info('Rename mode enabled: files will be renamed to "Title - Artist"');
   }
+  if (dedupStandaloneDelete) {
+    log.info('Standalone dedup enabled: duplicates will be logged to duplicates.txt and DELETED');
+  } else if (dedupStandaloneMove) {
+    log.info('Standalone dedup enabled: duplicates will be moved to duplicates/ folder');
+  } else if (dedupStandaloneLog) {
+    log.info('Standalone dedup enabled: duplicates will be logged to duplicates.txt and skipped');
+  }
 
   while (true) {
     try {
-      await run(processedFiles, target, useRecognition, force, rename);
+      await run(
+        processedFiles,
+        seenTracks,
+        target,
+        useRecognition,
+        force,
+        rename,
+        dedupStandaloneLog,
+        dedupStandaloneDelete,
+        dedupStandaloneMove,
+        concurrency,
+      );
       break; // Exit loop if run() completes successfully
     } catch (err) {
       log.error(`Fatal error: ${String(err)}`);

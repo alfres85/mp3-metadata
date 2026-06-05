@@ -16,9 +16,10 @@ A Node/TypeScript tool that scans folders, detects MP3 files without covers, ext
   - **Covers**: MusicBrainz/CoverArtArchive → iTunes (High-quality 600x600 artwork) → DuckDuckGo (Final fallback)
 - **ID3 Management**: Full support for reading/writing ID3v2 tags.
 - **Local Cover Cache**: Saves downloaded images locally to speed up subsequent runs.
-- **Audio Fingerprinting**: Integration with **ACRCloud** to identify music by listening to audio snippets.
+- **Audio Fingerprinting**: Integration with **ACRCloud** to identify music by listening to audio snippets, with automatic fallback to **AcoustID** (Chromaprint) when ACRCloud hits its limit.
+- **Duplicate Detection**: Fast standalone duplicate scan based on local metadata, with three action modes: log, delete, or move.
 - **Smart File Renaming**: Automatically renames files to a normalized `Title - Artist` format with collision handling.
-- **Concurrency Control**: Uses `p-queue` for efficient simultaneous tasks.
+- **Concurrency**: Processes up to **3 files simultaneously** by default using `p-queue`. Configurable via `--concurrency`.
 - **Professional Build**: Clean TypeScript architecture with compilation to `/dist`.
 
 ---
@@ -71,25 +72,31 @@ If no parameter is provided, it defaults to `./music`.
 
 The tool supports several flags to customize its behavior:
 
-| Flag          | Alias        | Description                                                                                                                                                                                                       |
-| :------------ | :----------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--recognize` | `-recognize` | **Audio Recognition**: Uses [ACRCloud](https://www.acrcloud.com/) to identify music by listening to a 12s snippet. This avoids skipping files that already have metadata, allowing you to "fix" or update labels. |
-| `--force`     | `-force`     | **Force Mode**: Re-processes files even if they already have embedded cover art. Useful for replacing low-quality covers.                                                                                         |
-| `--rename`    | `-rename`    | **Auto Rename**: Renames the file to `Title - Artist.mp3` after resolving metadata. Cleans illegal characters.                                                                                                    |
+| Flag             | Alias        | Description                                                                                                                                                                                                       |
+| :--------------- | :----------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--recognize`    | `-recognize` | **Audio Recognition**: Uses [ACRCloud](https://www.acrcloud.com/) to identify music by listening to a 12s snippet. If ACRCloud fails or hits its rate limit, automatically falls back to **AcoustID** (Chromaprint fingerprinting). |
+| `--force`        | `-force`     | **Force Mode**: Re-processes files even if they already have embedded cover art. Useful for replacing low-quality covers.                                                                                         |
+| `--rename`       | `-rename`    | **Auto Rename**: Renames the file to `Title - Artist.mp3` after resolving metadata. Cleans illegal characters.                                                                                                    |
+| `--concurrency <num>` | `-concurrency <num>` | **Concurrency**: Number of files to process simultaneously. Defaults to `3`. Increase to `4` or `5` on fast networks for a speed boost. |
+| `--dedup-standalone-log`    | `-dedup-standalone-log` | **Standalone Dedup (Log)**: Fast standalone pass that only checks for duplicate tracks based on local ID3 metadata. Skips all cover/metadata fetching. Logs duplicates to `duplicates.txt`. |
+| `--dedup-standalone-delete` | `-dedup-standalone-delete` | **Standalone Dedup (Delete)**: Same fast standalone pass, but permanently **deletes** duplicate files. The first copy encountered is always kept. Logs deletions to `duplicates.txt`. Use with caution. |
+| `--dedup-standalone-move`   | `-dedup-standalone-move` | **Standalone Dedup (Move)**: Same fast standalone pass, but **moves** duplicates into a `duplicates/` subfolder inside your target directory instead of deleting them. Logs moves to `duplicates.txt`. |
 
-#### **Examples**
+---
 
-**1. Recognize music using audio fingerprinting (ACRCloud):**
+## ▶️ Examples
+
+**1. Recognize music using audio fingerprinting (ACRCloud → AcoustID fallback):**
 
 ```bash
-# Uses npm script
-npm run recognize
+# Using the npm dev script
+npm run dev -- --recognize ./my/songs
 
-# Or directly with node
+# Or with the compiled build
 node dist/index.js --recognize ./my/songs
 ```
 
-_Note: Requires `ACRCLOUD_ACCESS_KEY`, `ACRCLOUD_ACCESS_SECRET`, and optionally `ACRCLOUD_HOST` in your environment._
+> **Note:** ACRCloud requires `ACRCLOUD_ACCESS_KEY`, `ACRCLOUD_ACCESS_SECRET`, and optionally `ACRCLOUD_HOST` in your environment. AcoustID fallback requires `ACOUSTID_API_KEY` in your environment and uses the bundled `bin/fpcalc.exe` to generate fingerprints.
 
 **2. Force update covers for all files:**
 
@@ -103,7 +110,31 @@ node dist/index.js --force ./my/songs
 node dist/index.js --recognize --force ./my/songs
 ```
 
-This will listen to every song to find accurate metadata and search for/embed a new cover for every file, even if they already have them.
+This will fingerprint every song, find accurate metadata, and embed a fresh cover for every file, even if they already have one.
+
+**4. Process 5 files at once for maximum speed:**
+
+```bash
+node dist/index.js --concurrency 5 ./my/songs
+```
+
+**5. Find and log duplicates without touching any files:**
+
+```bash
+node dist/index.js --dedup-standalone-log ./my/songs
+```
+
+**6. Move all duplicates to a `duplicates/` folder for manual review:**
+
+```bash
+node dist/index.js --dedup-standalone-move ./my/songs
+```
+
+**7. Permanently delete duplicates (keeps the first copy of each track):**
+
+```bash
+node dist/index.js --dedup-standalone-delete ./my/songs
+```
 
 ---
 
@@ -112,19 +143,23 @@ This will listen to every song to find accurate metadata and search for/embed a 
 ```
 mp3-auto-cover/
 │
+├── bin/
+│   └── fpcalc.exe        # Bundled Chromaprint binary for AcoustID fingerprinting
+│
 ├── config/
 │   ├── defaults.ts
 │   └── sources.ts
 │
 ├── src/
-│   ├── scanner/      # File system scanning and cache
-│   ├── metadata/     # ID3 reading and writing
-│   ├── cover/        # MusicBrainz, iTunes, and DDG services
-│   ├── utils/        # Logger and filename parser
-│   └── index.ts      # Main logic entry point
+│   ├── scanner/          # File system scanning and cache
+│   ├── metadata/         # ID3 reading/writing, ACRCloud, AcoustID
+│   ├── cover/            # MusicBrainz, iTunes, and DDG services
+│   ├── utils/            # Logger and filename parser
+│   └── types/            # Custom TypeScript declaration files
 │
-├── cache/            # Local image storage
-├── dist/             # Compiled JavaScript
+├── cache/                # Local image storage
+├── dist/                 # Compiled JavaScript
+├── duplicates.txt        # Log of all duplicate detection actions (auto-created)
 ├── package.json
 ├── tsconfig.json
 └── README.md
@@ -138,25 +173,40 @@ mp3-auto-cover/
 
 Searches for `.mp3` files in the target directory recursively.
 
-### 2. **Metadata Recovery**
+### 2. **Duplicate Detection (Standalone)**
+
+When using any `--dedup-standalone-*` flag, the tool runs a fast metadata-only scan first:
+- Reads local ID3 tags (Artist + Title) from every file.
+- Identifies duplicates by comparing `artist - title` keys (case-insensitive).
+- The **first** copy of every track is always kept safe.
+- Subsequent copies are either **logged**, **deleted**, or **moved** to a `duplicates/` folder, depending on the flag used.
+- All actions are appended to `duplicates.txt` in the current working directory.
+
+### 3. **Metadata Recovery**
 
 If the file is missing Artist or Album tags, the tool parses the filename and searches MusicBrainz/iTunes to reconstruct the missing information.
 
-### 3. **Cover Resolution Pipeline**
+### 4. **Audio Recognition Pipeline (with `--recognize`)**
+
+1. **ACRCloud**: Extracts a 12-second audio snippet via `ffmpeg` and sends it to ACRCloud for identification.
+2. **AcoustID** *(automatic fallback)*: If ACRCloud fails or hits its rate limit, the tool uses the bundled `fpcalc.exe` (Chromaprint) to generate a local audio fingerprint and queries the free AcoustID API using `ACOUSTID_API_KEY`.
+3. **Filename Parsing** *(final fallback)*: If both audio recognition services fail, the tool falls back to parsing the filename and searching MusicBrainz/iTunes by text.
+
+### 5. **Cover Resolution Pipeline**
 
 1.  **MusicBrainz/CoverArtArchive**: Searches for original releases.
 2.  **iTunes**: Fetches official, high-quality artwork (600x600).
 3.  **DuckDuckGo**: Fallback image search for rare or non-commercial tracks.
 
-### 4. **Local Cache**
+### 6. **Local Cache**
 
 Each image is hashed and stored in `/cache/covers` to prevent redundant downloads.
 
-### 5. **ID3 Embedding**
+### 7. **ID3 Embedding**
 
 The normalized image is embedded into the MP3 file as the official front cover.
 
-### 6. **Smart Renaming (Optional)**
+### 8. **Smart Renaming (Optional)**
 
 If `--rename` is used, the file is renamed to `Title - Artist.mp3`. If a file with that name already exists, the tool appends a counter (e.g., `(1)`, `(2)`) to avoid overwrites.
 
@@ -164,7 +214,25 @@ If `--rename` is used, the file is renamed to `Title - Artist.mp3`. If a file wi
 
 ## ⚡ Concurrency
 
-The tool uses `PQueue` with **3 concurrent tasks** to optimize network requests and cover downloads.
+The tool uses `p-queue` to process files in parallel. The default is **3 concurrent tasks**, which balances speed and API rate limits. You can customize this with `--concurrency <num>`.
+
+```bash
+# Run 5 files at once
+node dist/index.js --concurrency 5 ./my/songs
+```
+
+---
+
+## 🔑 Environment Variables
+
+| Variable               | Required | Description                                                   |
+| :--------------------- | :------- | :------------------------------------------------------------ |
+| `ACRCLOUD_ACCESS_KEY`  | For `--recognize` | Your ACRCloud project access key.                  |
+| `ACRCLOUD_ACCESS_SECRET` | For `--recognize` | Your ACRCloud project access secret.             |
+| `ACRCLOUD_HOST`        | Optional | ACRCloud endpoint. Defaults to `identify-us-west-2.acrcloud.com`. |
+| `ACOUSTID_API_KEY`     | For `--recognize` | Your AcoustID application API key. Get one for free at [acoustid.org/new-application](https://acoustid.org/new-application). Used as a fallback when ACRCloud fails. |
+
+> **Tip:** You can set these in a `.env` file or export them in your shell before running the tool.
 
 ---
 
