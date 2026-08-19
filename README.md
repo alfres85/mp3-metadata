@@ -16,7 +16,7 @@ A Node/TypeScript tool that scans folders, detects MP3 files without covers, ext
   - **Covers**: MusicBrainz/CoverArtArchive → iTunes (High-quality 600x600 artwork) → DuckDuckGo (Final fallback)
 - **ID3 Management**: Full support for reading/writing ID3v2 tags.
 - **Local Cover Cache**: Saves downloaded images locally to speed up subsequent runs.
-- **Audio Fingerprinting**: Integration with **Shazam API** first, then **ACRCloud**, with automatic fallback to **AcoustID** (Chromaprint) before filename parsing.
+- **Audio Fingerprinting & Recognition**: Integration with **OpenAI Whisper** (transcribing song lyrics to web search artist & title), **Shazam API**, **ACRCloud**, and **AcoustID** (Chromaprint).
 - **Duplicate Detection**: Fast standalone duplicate scan based on local metadata, with three action modes: log, delete, or move.
 - **Smart File Renaming**: Automatically renames files to a normalized `Title - Artist` format with collision handling.
 - **Concurrency**: Processes up to **3 files simultaneously** by default using `p-queue`. Configurable via `--concurrency`.
@@ -34,12 +34,32 @@ npm install
 
 ---
 
+## 🔑 Environment Setup
+
+To use OpenAI Whisper transcription for audio recognition, set your OpenAI API key as an environment variable or pass it via `--openai-key`:
+
+```bash
+# Windows PowerShell
+$env:OPENAI_API_KEY="your-openai-api-key"
+
+# Linux / macOS
+export OPENAI_API_KEY="your-openai-api-key"
+```
+
+---
+
 ## 🔧 Available Scripts
 
 ### **Development (with hot reload)**
 
 ```bash
 npm run dev
+```
+
+### **OpenAI Whisper Audio Recognition**
+
+```bash
+npm run openai-recon
 ```
 
 ### **Build to `/dist`**
@@ -72,10 +92,15 @@ If no parameter is provided, the tool starts an interactive console setup where 
 
 The tool supports several flags to customize its behavior:
 
-| Flag             | Alias        | Description                                                                                                                                                                                                       |
-| :--------------- | :----------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--recognize`    | `-recognize` | **Audio Recognition**: Uses Shazam API via a Node/WASM wrapper first, then [ACRCloud](https://www.acrcloud.com/), then **AcoustID** (Chromaprint fingerprinting), then filename parsing. |
-| `--force`        | `-force`     | **Force Mode**: Re-processes files even if they already have embedded cover art. Useful for replacing low-quality covers.                                                                                         |
+| Flag                 | Alias           | Description                                                                                                                                                                                                       |
+| :------------------- | :-------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--openai-recon`     | `--use-openai`  | **OpenAI Recognition**: Extracts an audio snippet, transcribes lyrics using OpenAI's Whisper API (`whisper-1`), and searches web sources (iTunes / MusicBrainz) to resolve `Artist - Title` & album metadata. |
+| `--openai-key <key>` | `--key`, `-k`   | **OpenAI API Key**: Pass your OpenAI API key directly via CLI (or `--key <key>`, `-k <key>`, `--openai-key=<key>`). |
+| `--acoustid-key <key>`| `-acoustid-key` | **AcoustID API Key**: Pass your AcoustID API key directly via CLI. |
+| `--acrcloud-key <key>`| `-acrcloud-key` | **ACRCloud Access Key**: Pass your ACRCloud access key directly via CLI. |
+| `--acrcloud-secret <sec>`| `-acrcloud-secret` | **ACRCloud Access Secret**: Pass your ACRCloud access secret directly via CLI. |
+| `--recognize`        | `-recognize`    | **Audio Recognition**: Uses Shazam API via a Node/WASM wrapper first, then [ACRCloud](https://www.acrcloud.com/), then **AcoustID** (Chromaprint fingerprinting), then filename parsing. |
+| `--force`            | `-force`        | **Force Mode**: Re-processes files even if they already have embedded cover art. Useful for replacing low-quality covers.                                                                                         |
 | `--rename`       | `-rename`    | **Auto Rename**: Renames the file to `Title - Artist.mp3` after resolving metadata. Cleans illegal characters.                                                                                                    |
 | `--interactive`  | `-interactive` | **Interactive Mode**: Opens a console setup to choose the target folder, action mode, force/rename options, and concurrency. Also starts automatically when no parameters are provided. |
 | `--concurrency <num>` | `-concurrency <num>` | **Concurrency**: Number of files to process simultaneously. Defaults to `3`. Increase to `4` or `5` on fast networks for a speed boost. |

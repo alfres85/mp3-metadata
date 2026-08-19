@@ -19,6 +19,8 @@ import PQueue from 'p-queue';
 type CliOptions = {
   target: string;
   useRecognition: boolean;
+  useOpenAIRecognition: boolean;
+  openaiKey?: string;
   force: boolean;
   rename: boolean;
   dedupStandaloneLog: boolean;
@@ -183,20 +185,28 @@ async function getInteractiveOptions(): Promise<CliOptions> {
 
     console.log('\nAction:');
     console.log('  1. Process metadata and covers');
-    console.log('  2. Recognize audio, metadata, and covers');
-    console.log('  3. Deduplicate: log only');
-    console.log('  4. Deduplicate: move duplicates');
-    console.log('  5. Deduplicate: delete duplicates');
+    console.log('  2. Recognize audio, metadata, and covers (Shazam / ACRCloud / AcoustID)');
+    console.log('  3. Recognize audio via OpenAI Whisper (Transcribe Lyrics -> Web Search)');
+    console.log('  4. Deduplicate: log only');
+    console.log('  5. Deduplicate: move duplicates');
+    console.log('  6. Deduplicate: delete duplicates');
 
     let action = '';
-    while (!['1', '2', '3', '4', '5'].includes(action)) {
+    while (!['1', '2', '3', '4', '5', '6'].includes(action)) {
       action = (await rl.question('Choose action [1]: ')).trim() || '1';
     }
 
     const useRecognition = action === '2';
-    const dedupStandaloneLog = action === '3';
-    const dedupStandaloneMove = action === '4';
-    let dedupStandaloneDelete = action === '5';
+    const useOpenAIRecognition = action === '3';
+    let openaiKey: string | undefined = undefined;
+
+    if (useOpenAIRecognition && !process.env.OPENAI_API_KEY) {
+      openaiKey = (await rl.question('Enter OpenAI API Key (or press Enter if set in OPENAI_API_KEY env): ')).trim() || undefined;
+    }
+
+    const dedupStandaloneLog = action === '4';
+    const dedupStandaloneMove = action === '5';
+    let dedupStandaloneDelete = action === '6';
 
     if (dedupStandaloneDelete) {
       const confirmation = await rl.question('Type DELETE to confirm permanent duplicate deletion: ');
@@ -206,7 +216,7 @@ async function getInteractiveOptions(): Promise<CliOptions> {
       }
     }
 
-    const isDedupOnly = dedupStandaloneLog || dedupStandaloneMove || dedupStandaloneDelete || action === '5';
+    const isDedupOnly = dedupStandaloneLog || dedupStandaloneMove || dedupStandaloneDelete || action === '6';
     const force = !isDedupOnly && await askYesNo(rl, 'Force re-process files with existing covers');
     const rename = !isDedupOnly && await askYesNo(rl, 'Rename files to "Title - Artist"');
     const concurrency = await askNumber(rl, 'Concurrency', 3, 1);
@@ -214,9 +224,11 @@ async function getInteractiveOptions(): Promise<CliOptions> {
     return {
       target,
       useRecognition,
+      useOpenAIRecognition,
+      openaiKey,
       force,
       rename,
-      dedupStandaloneLog: dedupStandaloneLog || (action === '5' && !dedupStandaloneDelete),
+      dedupStandaloneLog: dedupStandaloneLog || (action === '6' && !dedupStandaloneDelete),
       dedupStandaloneDelete,
       dedupStandaloneMove,
       concurrency,
@@ -224,6 +236,30 @@ async function getInteractiveOptions(): Promise<CliOptions> {
   } finally {
     rl.close();
   }
+}
+
+function parseCliOptionValue(
+  args: string[],
+  flags: string[],
+  consumedIndices: Set<number>,
+): string | undefined {
+  for (const flag of flags) {
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg.startsWith(`${flag}=`)) {
+        consumedIndices.add(i);
+        return arg.slice(flag.length + 1);
+      }
+      if (arg === flag) {
+        consumedIndices.add(i);
+        if (i + 1 < args.length && !args[i + 1].startsWith('-')) {
+          consumedIndices.add(i + 1);
+          return args[i + 1];
+        }
+      }
+    }
+  }
+  return undefined;
 }
 
 async function getCliOptions(args: string[]): Promise<CliOptions> {
@@ -234,30 +270,87 @@ async function getCliOptions(args: string[]): Promise<CliOptions> {
     return getInteractiveOptions();
   }
 
-  const useRecognition = filteredArgs.includes('--recognize') || filteredArgs.includes('-recognize');
-  const force = filteredArgs.includes('--force') || filteredArgs.includes('-force');
-  const rename = filteredArgs.includes('--rename') || filteredArgs.includes('-rename');
-  const dedupStandaloneLog = filteredArgs.includes('--dedup-standalone-log') || filteredArgs.includes('-dedup-standalone-log');
-  const dedupStandaloneDelete = filteredArgs.includes('--dedup-standalone-delete') || filteredArgs.includes('-dedup-standalone-delete');
-  const dedupStandaloneMove = filteredArgs.includes('--dedup-standalone-move') || filteredArgs.includes('-dedup-standalone-move');
+  const consumedIndices = new Set<number>();
 
-  let concurrency = 3;
-  let concurrencyIndex = filteredArgs.indexOf('--concurrency');
-  if (concurrencyIndex === -1) {
-    concurrencyIndex = filteredArgs.indexOf('-concurrency');
-  }
-  if (concurrencyIndex !== -1 && filteredArgs[concurrencyIndex + 1]) {
-    concurrency = parseInt(filteredArgs[concurrencyIndex + 1], 10);
-  }
+  const useRecognition = filteredArgs.some((arg, idx) => {
+    if (arg === '--recognize' || arg === '-recognize') {
+      consumedIndices.add(idx);
+      return true;
+    }
+    return false;
+  });
 
-  const concurrencyValueIndex = concurrencyIndex === -1 ? -1 : concurrencyIndex + 1;
-  const target = filteredArgs.find((arg: string, index: number) => (
-    !arg.startsWith('-') && index !== concurrencyValueIndex
-  )) || './music';
+  const useOpenAIRecognition = filteredArgs.some((arg, idx) => {
+    if (arg === '--openai-recon' || arg === '-openai-recon' || arg === '--use-openai') {
+      consumedIndices.add(idx);
+      return true;
+    }
+    return false;
+  });
+
+  const openaiKey = parseCliOptionValue(
+    filteredArgs,
+    ['--openai-key', '-openai-key', '--openaiKey', '--key', '-key', '-k'],
+    consumedIndices,
+  );
+
+  const force = filteredArgs.some((arg, idx) => {
+    if (arg === '--force' || arg === '-force') {
+      consumedIndices.add(idx);
+      return true;
+    }
+    return false;
+  });
+
+  const rename = filteredArgs.some((arg, idx) => {
+    if (arg === '--rename' || arg === '-rename') {
+      consumedIndices.add(idx);
+      return true;
+    }
+    return false;
+  });
+
+  const dedupStandaloneLog = filteredArgs.some((arg, idx) => {
+    if (arg === '--dedup-standalone-log' || arg === '-dedup-standalone-log') {
+      consumedIndices.add(idx);
+      return true;
+    }
+    return false;
+  });
+
+  const dedupStandaloneDelete = filteredArgs.some((arg, idx) => {
+    if (arg === '--dedup-standalone-delete' || arg === '-dedup-standalone-delete') {
+      consumedIndices.add(idx);
+      return true;
+    }
+    return false;
+  });
+
+  const dedupStandaloneMove = filteredArgs.some((arg, idx) => {
+    if (arg === '--dedup-standalone-move' || arg === '-dedup-standalone-move') {
+      consumedIndices.add(idx);
+      return true;
+    }
+    return false;
+  });
+
+  const rawConcurrency = parseCliOptionValue(
+    filteredArgs,
+    ['--concurrency', '-concurrency'],
+    consumedIndices,
+  );
+  const concurrency = rawConcurrency ? parseInt(rawConcurrency, 10) : 3;
+
+  const target =
+    filteredArgs.find(
+      (arg: string, index: number) => !arg.startsWith('-') && !consumedIndices.has(index),
+    ) || './music';
 
   return {
     target,
     useRecognition,
+    useOpenAIRecognition,
+    openaiKey,
     force,
     rename,
     dedupStandaloneLog,
@@ -273,6 +366,8 @@ async function run(
   unknownArtistFiles: Set<string>,
   target: string,
   useRecognition: boolean,
+  useOpenAIRecognition: boolean,
+  openaiKey: string | undefined,
   force: boolean,
   rename: boolean,
   dedupStandaloneLog: boolean,
@@ -304,10 +399,15 @@ async function run(
           }
         } else if (dedupStandaloneMove) {
           if (hasNumberedDuplicateSuffix(keptFile) && !hasNumberedDuplicateSuffix(file)) {
-            log.warn(`Duplicate detected; keeping clean filename in main folder: ${file} (${artist} - ${title})`);
+            log.warn(
+              `Duplicate detected; keeping clean filename in main folder: ${file} (${artist} - ${title})`,
+            );
             const targetPath = moveDuplicateToFolder(keptFile, target);
             if (targetPath) {
-              fs.appendFileSync('duplicates.txt', `MOVED: ${keptFile} -> ${targetPath} (kept ${file})\n`);
+              fs.appendFileSync(
+                'duplicates.txt',
+                `MOVED: ${keptFile} -> ${targetPath} (kept ${file})\n`,
+              );
               processedFiles.add(keptFile);
               seenTracks.set(trackKey, file);
             }
@@ -347,7 +447,14 @@ async function run(
       return;
     }
 
-    if (!force && !useRecognition && tag.image && tag.artist && tag.album) {
+    if (
+      !force &&
+      !useRecognition &&
+      !useOpenAIRecognition &&
+      tag.image &&
+      tag.artist &&
+      tag.album
+    ) {
       log.info(`(${i + 1}/${files.length}) Skipping: ${file} (Metadata and cover already exist)`);
       if (rename && tag.artist && tag.title) {
         applyRename(file, tag.artist, tag.title, processedFiles);
@@ -358,16 +465,23 @@ async function run(
 
     log.info(`(${i + 1}/${files.length}) Processing: ${file}`);
 
-    if (!tag.artist || !tag.title || useRecognition) {
+    if (!tag.artist || !tag.title || useRecognition || useOpenAIRecognition) {
       let webMetadata = null;
 
-      if (useRecognition) {
+      if (useOpenAIRecognition) {
+        log.info('Attempting audio recognition via OpenAI Whisper lyrics transcription...');
+        const { recognizeFromOpenAI } = await import('./src/metadata/openai.js');
+        webMetadata = await recognizeFromOpenAI(file, openaiKey);
+      }
+
+      if (!webMetadata && useRecognition) {
         log.info('Attempting audio recognition via Shazam...');
         const { recognizeFromShazam } = await import('./src/metadata/shazam.js');
         webMetadata = await recognizeFromShazam(file);
 
         if (!webMetadata) {
           log.warn('Shazam failed or returned no match. Falling back to ACRCloud...');
+          const { recognizeFromAudio } = await import('./src/metadata/acrcloud.js');
           webMetadata = await recognizeFromAudio(file);
         }
 
@@ -381,7 +495,9 @@ async function run(
       if (!webMetadata && !tag.artist) {
         log.info('Missing metadata, attempting to fetch from filename');
         const parsed = parseFilename(file);
-        const parsedArtist = hasUsefulMetadataValue(parsed.artist || undefined) ? parsed.artist : null;
+        const parsedArtist = hasUsefulMetadataValue(parsed.artist || undefined)
+          ? parsed.artist
+          : null;
         const parsedTitle = hasUsefulMetadataValue(parsed.title || undefined) ? parsed.title : null;
 
         if (parsedTitle) {
@@ -472,6 +588,8 @@ async function main() {
   const {
     target,
     useRecognition,
+    useOpenAIRecognition,
+    openaiKey,
     force,
     rename,
     dedupStandaloneLog,
@@ -486,9 +604,17 @@ async function main() {
   const unknownArtistFiles = new Set<string>();
 
   if (dedupStandaloneLog || dedupStandaloneDelete || dedupStandaloneMove) {
-    fs.appendFileSync('duplicates.txt', `\n--- Duplicate Scan Started at ${new Date().toISOString()} ---\n`);
+    fs.appendFileSync(
+      'duplicates.txt',
+      `\n--- Duplicate Scan Started at ${new Date().toISOString()} ---\n`,
+    );
   }
 
+  if (useOpenAIRecognition) {
+    log.info(
+      'Running in OpenAI recognition mode (Whisper audio transcription -> Web lyric search)',
+    );
+  }
   if (useRecognition) {
     log.info('Running in recognition mode using Shazam -> ACRCloud -> AcoustID');
   }
@@ -515,6 +641,8 @@ async function main() {
         unknownArtistFiles,
         target,
         useRecognition,
+        useOpenAIRecognition,
+        openaiKey,
         force,
         rename,
         dedupStandaloneLog,
@@ -535,7 +663,10 @@ async function main() {
     console.log(`\n⚠️  ALERT: Found ${unknownArtistFiles.size} file(s) with unknown artist/name`);
 
     // Log to file
-    fs.appendFileSync('unknown_artist.txt', `\n--- Unknown Artist Files Scan at ${new Date().toISOString()} ---\n`);
+    fs.appendFileSync(
+      'unknown_artist.txt',
+      `\n--- Unknown Artist Files Scan at ${new Date().toISOString()} ---\n`,
+    );
     unknownArtistFiles.forEach((file) => {
       fs.appendFileSync('unknown_artist.txt', `${file}\n`);
     });
