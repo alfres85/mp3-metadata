@@ -236,25 +236,96 @@ export async function identifySongWithOpenAI(
   return null;
 }
 
+export async function searchAudDByLyrics(
+  lyrics: string,
+  apiKey?: string,
+): Promise<{ artist: string; title: string } | null> {
+  const token = apiKey || process.env.AUDD_API_KEY || 'test';
+  try {
+    const cleanQuery = lyrics.slice(0, 250).replace(/\s+/g, ' ').trim();
+    if (!cleanQuery) return null;
+
+    log.info(`Searching AudD for lyrics: "${cleanQuery.slice(0, 50)}..."`);
+    const response = await axios.get('https://api.audd.io/findLyrics/', {
+      params: {
+        q: cleanQuery,
+        api_token: token,
+      },
+      timeout: 10000,
+    });
+
+    if (response.data?.status === 'success' && Array.isArray(response.data.result) && response.data.result.length > 0) {
+      const match = response.data.result[0];
+      if (match.artist && match.title) {
+        log.info(`AudD match found: "${match.artist} - ${match.title}"`);
+        return { artist: String(match.artist).trim(), title: String(match.title).trim() };
+      }
+    }
+  } catch (err: any) {
+    const errorMsg = err.response?.data?.error?.error_message || err.message;
+    log.warn(`AudD lyrics search failed: ${errorMsg}`);
+  }
+  return null;
+}
+
+export async function searchLyricsOvh(
+  lyrics: string,
+): Promise<{ artist: string; title: string } | null> {
+  try {
+    const cleanQuery = lyrics.slice(0, 100).replace(/[^\w\s\u00C0-\u024F]/gi, ' ').replace(/\s+/g, ' ').trim();
+    if (!cleanQuery) return null;
+
+    log.info(`Searching lyrics.ovh suggest endpoint for: "${cleanQuery.slice(0, 50)}..."`);
+    const response = await axios.get(`https://api.lyrics.ovh/suggest/${encodeURIComponent(cleanQuery)}`, {
+      timeout: 8000,
+    });
+
+    if (response.data?.data && Array.isArray(response.data.data) && response.data.data.length > 0) {
+      const match = response.data.data[0];
+      const artist = match.artist?.name;
+      const title = match.title;
+      if (artist && title) {
+        log.info(`lyrics.ovh suggest match found: "${artist} - ${title}"`);
+        return { artist: String(artist).trim(), title: String(title).trim() };
+      }
+    }
+  } catch (err: any) {
+    log.warn(`lyrics.ovh search failed: ${err.message}`);
+  }
+  return null;
+}
+
 export async function recognizeFromOpenAI(
   filePath: string,
   apiKey?: string,
+  auddKey?: string,
 ): Promise<ACRCloudMetadata | null> {
   const transcript = await transcribeAudioSnippet(filePath, apiKey);
   if (!transcript) {
     return null;
   }
 
-  // Step 1: Use OpenAI Chat Completion to identify song title & artist from lyrics
-  let songCandidate = await identifySongWithOpenAI(transcript, apiKey);
+  // 1. AudD Lyrics Search
+  let songCandidate = await searchAudDByLyrics(transcript, auddKey);
 
-  // Step 2: If OpenAI Chat couldn't identify, fallback to web lyric search
+  // 2. lyrics.ovh Search
+  if (!songCandidate) {
+    log.info('AudD search returned no match. Falling back to lyrics.ovh...');
+    songCandidate = await searchLyricsOvh(transcript);
+  }
+
+  // 3. OpenAI Chat & Web Search Fallbacks
+  if (!songCandidate) {
+    log.info('lyrics.ovh returned no match. Falling back to OpenAI Chat identification...');
+    songCandidate = await identifySongWithOpenAI(transcript, apiKey);
+  }
+
   if (!songCandidate) {
     log.info('OpenAI Chat could not identify track directly. Trying web lyric search...');
     songCandidate = await searchWebForLyrics(transcript);
   }
 
-  // Step 3: Fetch full metadata from MusicBrainz and iTunes using candidate song & artist
+  // Fetch full metadata from MusicBrainz and iTunes using candidate song & artist
   if (songCandidate) {
     log.info(`Song candidate identified: "${songCandidate.artist} - ${songCandidate.title}"`);
 
