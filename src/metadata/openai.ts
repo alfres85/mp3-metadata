@@ -61,8 +61,9 @@ function createAudioSnippet(
   return null;
 }
 
-
-function parseArtistTitleFromSearchResult(rawTitle: string): { artist: string; title: string } | null {
+function parseArtistTitleFromSearchResult(
+  rawTitle: string,
+): { artist: string; title: string } | null {
   let clean = rawTitle
     .replace(/<[^>]+>/g, '')
     .replace(/&amp;/g, '&')
@@ -74,7 +75,10 @@ function parseArtistTitleFromSearchResult(rawTitle: string): { artist: string; t
 
   // Strip common website suffixes
   clean = clean
-    .replace(/\s*[\-\|]\s*(Genius|AZLyrics|Musixmatch|Spotify|YouTube|Lyrics|Apple Music|Soundcharts|Songlyrics).*$/i, '')
+    .replace(
+      /\s*[\-\|]\s*(Genius|AZLyrics|Musixmatch|Spotify|YouTube|Lyrics|Apple Music|Soundcharts|Songlyrics).*$/i,
+      '',
+    )
     .replace(/\s+lyrics$/i, '')
     .trim();
 
@@ -97,9 +101,15 @@ function parseArtistTitleFromSearchResult(rawTitle: string): { artist: string; t
   return null;
 }
 
-export async function searchWebForLyrics(lyrics: string): Promise<{ artist: string; title: string } | null> {
+export async function searchWebForLyrics(
+  lyrics: string,
+): Promise<{ artist: string; title: string } | null> {
   try {
-    const cleanQuery = lyrics.slice(0, 100).replace(/[^\w\s\u00C0-\u024F]/gi, ' ').replace(/\s+/g, ' ').trim();
+    const cleanQuery = lyrics
+      .slice(0, 100)
+      .replace(/[^\w\s\u00C0-\u024F]/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (!cleanQuery) return null;
 
     log.info(`Searching web for song & artist matching lyrics: "${cleanQuery.slice(0, 50)}..."`);
@@ -222,7 +232,10 @@ export async function identifySongWithOpenAI(
     const content = response.data?.choices?.[0]?.message?.content?.trim();
     if (!content) return null;
 
-    const cleaned = content.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim();
+    const cleaned = content
+      .replace(/^```json\s*/i, '')
+      .replace(/\s*```$/, '')
+      .trim();
     const parsed = JSON.parse(cleaned);
 
     if (parsed.artist && parsed.title) {
@@ -254,7 +267,11 @@ export async function searchAudDByLyrics(
       timeout: 10000,
     });
 
-    if (response.data?.status === 'success' && Array.isArray(response.data.result) && response.data.result.length > 0) {
+    if (
+      response.data?.status === 'success' &&
+      Array.isArray(response.data.result) &&
+      response.data.result.length > 0
+    ) {
       const match = response.data.result[0];
       if (match.artist && match.title) {
         log.info(`AudD match found: "${match.artist} - ${match.title}"`);
@@ -272,13 +289,20 @@ export async function searchLyricsOvh(
   lyrics: string,
 ): Promise<{ artist: string; title: string } | null> {
   try {
-    const cleanQuery = lyrics.slice(0, 100).replace(/[^\w\s\u00C0-\u024F]/gi, ' ').replace(/\s+/g, ' ').trim();
+    const cleanQuery = lyrics
+      .slice(0, 200)
+      .replace(/[^\w\s\u00C0-\u024F]/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (!cleanQuery) return null;
 
-    log.info(`Searching lyrics.ovh suggest endpoint for: "${cleanQuery.slice(0, 50)}..."`);
-    const response = await axios.get(`https://api.lyrics.ovh/suggest/${encodeURIComponent(cleanQuery)}`, {
-      timeout: 8000,
-    });
+    log.info(`Searching lyrics.ovh suggest endpoint for: "${cleanQuery.slice(0, 200)}..."`);
+    const response = await axios.get(
+      `https://api.lyrics.ovh/suggest/${encodeURIComponent(cleanQuery)}`,
+      {
+        timeout: 8000,
+      },
+    );
 
     if (response.data?.data && Array.isArray(response.data.data) && response.data.data.length > 0) {
       const match = response.data.data[0];
@@ -306,7 +330,7 @@ export async function recognizeFromOpenAI(
   }
 
   // 1. AudD Lyrics Search
-  let songCandidate = await searchAudDByLyrics(transcript, auddKey);
+  let songCandidate = null; //await searchAudDByLyrics(transcript, auddKey);
 
   // 2. lyrics.ovh Search
   if (!songCandidate) {
@@ -329,13 +353,17 @@ export async function recognizeFromOpenAI(
   if (songCandidate) {
     log.info(`Song candidate identified: "${songCandidate.artist} - ${songCandidate.title}"`);
 
-    log.info(`Fetching metadata from MusicBrainz for candidate: ${songCandidate.artist} - ${songCandidate.title}`);
+    log.info(
+      `Fetching metadata from MusicBrainz for candidate: ${songCandidate.artist} - ${songCandidate.title}`,
+    );
     let mbMetadata = await searchRecording(songCandidate.artist, songCandidate.title);
     if (mbMetadata && isUsableMetadata(mbMetadata)) {
       return mbMetadata;
     }
 
-    log.info(`Fetching metadata from iTunes for candidate: ${songCandidate.artist} - ${songCandidate.title}`);
+    log.info(
+      `Fetching metadata from iTunes for candidate: ${songCandidate.artist} - ${songCandidate.title}`,
+    );
     let iTunesMetadata = await searchiTunesMetadata(songCandidate.artist, songCandidate.title);
     if (iTunesMetadata && isUsableMetadata(iTunesMetadata)) {
       return iTunesMetadata;
