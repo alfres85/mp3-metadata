@@ -49,6 +49,7 @@ export async function recognizeFromAcoustID(filePath: string): Promise<ACRCloudM
 
     const response = await axios.post('https://api.acoustid.org/v2/lookup', params, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 15000,
     });
     const data = response.data;
     

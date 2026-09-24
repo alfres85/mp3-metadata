@@ -30,8 +30,8 @@ export function parseFilename(filePath: string): ParsedFilename {
       const parts = cleanName.split(splitter);
       if (parts.length >= 2) {
         return {
-          artist: parts[0].trim(),
-          title: parts[1].trim(),
+          title: parts[0].trim(),
+          artist: parts[1].trim(),
         };
       }
     }

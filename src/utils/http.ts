@@ -1,34 +1,45 @@
-import axios, { AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
+import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios';
+import { DEFAULT_CONFIG } from '../../config/defaults.js';
 import { log } from './logger.js';
 
 const MAX_RETRIES = 3;
 const INITIAL_DELAY = 1000;
+const RETRIABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+const RETRIABLE_ERROR_CODES = new Set([
+  'ECONNABORTED',
+  'ECONNRESET',
+  'EAI_AGAIN',
+  'ETIMEDOUT',
+]);
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function requestWithRetry<T>(
   config: AxiosRequestConfig,
-  retries = MAX_RETRIES
+  retries = MAX_RETRIES,
 ): Promise<AxiosResponse<T>> {
-  try {
-    return await axios(config);
-  } catch (error) {
-    const axiosError = error as AxiosError;
-    const status = axiosError.response?.status;
-    const shouldRetry =
-      retries > 0 && (!status || status === 503 || status === 429 || status >= 500);
+  const requestConfig = {
+    ...config,
+    timeout: config.timeout ?? DEFAULT_CONFIG.requestTimeout,
+  };
 
-    if (shouldRetry) {
-      const delay = INITIAL_DELAY * (MAX_RETRIES - retries + 1);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await axios<T>(requestConfig);
+    } catch (error) {
+      if (!axios.isAxiosError(error)) throw error;
+
+      const status = error.response?.status;
+      const retriable = status
+        ? RETRIABLE_STATUS_CODES.has(status)
+        : RETRIABLE_ERROR_CODES.has(error.code || '');
+      if (!retriable || attempt >= retries) throw error;
+
+      const delay = INITIAL_DELAY * (attempt + 1);
       log.warn(
-        `Request failed (${status || 'timeout'}). Retrying in ${delay}ms... (${
-          MAX_RETRIES - retries + 1
-        }/${MAX_RETRIES})`
+        `Request failed (${status ?? error.code}). Retrying in ${delay}ms... (${attempt + 1}/${retries})`,
       );
       await sleep(delay);
-      return requestWithRetry(config, retries - 1);
     }
-
-    throw error;
   }
 }

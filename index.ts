@@ -14,12 +14,14 @@ import fs from 'fs';
 import path from 'node:path';
 import process from 'node:process';
 import { createInterface, type Interface } from 'node:readline/promises';
-import PQueue from 'p-queue';
+
 
 type CliOptions = {
   target: string;
   useRecognition: boolean;
   useOpenAIRecognition: boolean;
+  useOpenAICover: boolean;
+  useFilenameSearch: boolean;
   openaiKey?: string;
   force: boolean;
   rename: boolean;
@@ -27,6 +29,7 @@ type CliOptions = {
   dedupStandaloneDelete: boolean;
   dedupStandaloneMove: boolean;
   concurrency: number;
+  country?: string;
 };
 
 function applyRename(
@@ -38,16 +41,25 @@ function applyRename(
   const dir = path.dirname(file);
   const ext = path.extname(file);
   // Clean filename from illegal characters
-  const cleanArtist = artist.replace(/[\\/<>:"|?*]/g, '');
-  const cleanTitle = title.replace(/[\\/<>:"|?*]/g, '');
-  const baseName = `${cleanTitle} - ${cleanArtist}`;
+  const cleanArtist = artist.replace(/[\\/<>:"|?*]/g, '').trim();
+  const cleanTitle = title.replace(/[\\/<>:"|?*]/g, '').trim();
+  if (!cleanArtist || !cleanTitle) return file;
 
+  const baseName = `${cleanTitle} - ${cleanArtist}`;
   let newName = `${baseName}${ext}`;
   let newPath = path.join(dir, newName);
   let counter = 1;
 
+  const absFile = path.resolve(file);
+  const isSameFile = (targetPath: string) => {
+    const resolvedTarget = path.resolve(targetPath);
+    return process.platform === 'win32'
+      ? resolvedTarget.toLowerCase() === absFile.toLowerCase()
+      : resolvedTarget === absFile;
+  };
+
   // Handle collision by adding (1), (2), etc.
-  while (fs.existsSync(newPath) && file !== newPath) {
+  while (fs.existsSync(newPath) && !isSameFile(newPath)) {
     newName = `${baseName} (${counter})${ext}`;
     newPath = path.join(dir, newName);
     counter++;
@@ -187,26 +199,28 @@ async function getInteractiveOptions(): Promise<CliOptions> {
     console.log('  1. Process metadata and covers');
     console.log('  2. Recognize audio, metadata, and covers (Shazam / ACRCloud / AcoustID)');
     console.log('  3. Recognize audio via OpenAI Whisper (Transcribe Lyrics -> Web Search)');
-    console.log('  4. Deduplicate: log only');
-    console.log('  5. Deduplicate: move duplicates');
-    console.log('  6. Deduplicate: delete duplicates');
+    console.log('  4. Search metadata & cover by filename');
+    console.log('  5. Deduplicate: log only');
+    console.log('  6. Deduplicate: move duplicates');
+    console.log('  7. Deduplicate: delete duplicates');
 
     let action = '';
-    while (!['1', '2', '3', '4', '5', '6'].includes(action)) {
+    while (!['1', '2', '3', '4', '5', '6', '7'].includes(action)) {
       action = (await rl.question('Choose action [1]: ')).trim() || '1';
     }
 
     const useRecognition = action === '2';
     const useOpenAIRecognition = action === '3';
+    const useFilenameSearch = action === '4';
     let openaiKey: string | undefined = undefined;
 
     if (useOpenAIRecognition && !process.env.OPENAI_API_KEY) {
       openaiKey = (await rl.question('Enter OpenAI API Key (or press Enter if set in OPENAI_API_KEY env): ')).trim() || undefined;
     }
 
-    const dedupStandaloneLog = action === '4';
-    const dedupStandaloneMove = action === '5';
-    let dedupStandaloneDelete = action === '6';
+    const dedupStandaloneLog = action === '5';
+    const dedupStandaloneMove = action === '6';
+    let dedupStandaloneDelete = action === '7';
 
     if (dedupStandaloneDelete) {
       const confirmation = await rl.question('Type DELETE to confirm permanent duplicate deletion: ');
@@ -216,7 +230,7 @@ async function getInteractiveOptions(): Promise<CliOptions> {
       }
     }
 
-    const isDedupOnly = dedupStandaloneLog || dedupStandaloneMove || dedupStandaloneDelete || action === '6';
+    const isDedupOnly = dedupStandaloneLog || dedupStandaloneMove || dedupStandaloneDelete || action === '7';
     const force = !isDedupOnly && await askYesNo(rl, 'Force re-process files with existing covers');
     const rename = !isDedupOnly && await askYesNo(rl, 'Rename files to "Title - Artist"');
     const concurrency = await askNumber(rl, 'Concurrency', 3, 1);
@@ -225,13 +239,16 @@ async function getInteractiveOptions(): Promise<CliOptions> {
       target,
       useRecognition,
       useOpenAIRecognition,
+      useOpenAICover: false,
+      useFilenameSearch,
       openaiKey,
       force,
       rename,
-      dedupStandaloneLog: dedupStandaloneLog || (action === '6' && !dedupStandaloneDelete),
+      dedupStandaloneLog: dedupStandaloneLog || (action === '7' && !dedupStandaloneDelete),
       dedupStandaloneDelete,
       dedupStandaloneMove,
       concurrency,
+      country: (process.env.ITUNES_COUNTRY || 'US').trim().toUpperCase(),
     };
   } finally {
     rl.close();
@@ -282,6 +299,35 @@ async function getCliOptions(args: string[]): Promise<CliOptions> {
 
   const useOpenAIRecognition = filteredArgs.some((arg, idx) => {
     if (arg === '--openai-recon' || arg === '-openai-recon' || arg === '--use-openai') {
+      consumedIndices.add(idx);
+      return true;
+    }
+    return false;
+  });
+
+  const useOpenAICover = filteredArgs.some((arg, idx) => {
+    if (
+      arg === '--openai-cover' ||
+      arg === '-openai-cover' ||
+      arg === '--use-openai-cover' ||
+      arg === '-use-openai-cover' ||
+      arg === '--openai-cover-search'
+    ) {
+      consumedIndices.add(idx);
+      return true;
+    }
+    return false;
+  });
+
+  const useFilenameSearch = filteredArgs.some((arg, idx) => {
+    if (
+      arg === '--from-filename' ||
+      arg === '-from-filename' ||
+      arg === '--by-filename' ||
+      arg === '-by-filename' ||
+      arg === '--filename-search' ||
+      arg === '-filename-search'
+    ) {
       consumedIndices.add(idx);
       return true;
     }
@@ -339,7 +385,18 @@ async function getCliOptions(args: string[]): Promise<CliOptions> {
     ['--concurrency', '-concurrency'],
     consumedIndices,
   );
-  const concurrency = rawConcurrency ? parseInt(rawConcurrency, 10) : 3;
+  const concurrency = rawConcurrency === undefined ? 3 : Number(rawConcurrency);
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    throw new Error('--concurrency must be a positive integer');
+  }
+
+  const rawCountry = parseCliOptionValue(
+    filteredArgs,
+    ['--country', '-country', '--itunes-country', '-itunes-country'],
+    consumedIndices,
+  );
+  const country = (rawCountry || process.env.ITUNES_COUNTRY || 'US').trim().toUpperCase();
+  process.env.ITUNES_COUNTRY = country;
 
   const target =
     filteredArgs.find(
@@ -350,6 +407,8 @@ async function getCliOptions(args: string[]): Promise<CliOptions> {
     target,
     useRecognition,
     useOpenAIRecognition,
+    useOpenAICover,
+    useFilenameSearch,
     openaiKey,
     force,
     rename,
@@ -357,6 +416,7 @@ async function getCliOptions(args: string[]): Promise<CliOptions> {
     dedupStandaloneDelete,
     dedupStandaloneMove,
     concurrency,
+    country,
   };
 }
 
@@ -367,6 +427,8 @@ async function run(
   target: string,
   useRecognition: boolean,
   useOpenAIRecognition: boolean,
+  useOpenAICover: boolean,
+  useFilenameSearch: boolean,
   openaiKey: string | undefined,
   force: boolean,
   rename: boolean,
@@ -379,8 +441,6 @@ async function run(
   const files = await scanForMp3(target);
   log.info(`Found ${files.length} MP3 files`);
 
-  const queue = new PQueue({ concurrency });
-
   const tasks = files.map((file, i) => async () => {
     if (processedFiles.has(file)) return;
 
@@ -390,13 +450,14 @@ async function run(
       const keptFile = seenTracks.get(trackKey);
       if (keptFile) {
         if (dedupStandaloneDelete) {
-          log.warn(`Duplicate detected and deleted: ${file} (${artist} - ${title})`);
-          fs.appendFileSync('duplicates.txt', `DELETED: ${file} (${artist} - ${title})\n`);
           try {
             fs.unlinkSync(file);
           } catch (err) {
-            log.error(`Failed to delete duplicate: ${file}`);
+            log.error(`Failed to delete duplicate ${file}: ${String(err)}`);
+            return true;
           }
+          fs.appendFileSync('duplicates.txt', `DELETED: ${file} (${artist} - ${title})\n`);
+          log.warn(`Duplicate detected and deleted: ${file} (${artist} - ${title})`);
         } else if (dedupStandaloneMove) {
           if (hasNumberedDuplicateSuffix(keptFile) && !hasNumberedDuplicateSuffix(file)) {
             log.warn(
@@ -438,6 +499,17 @@ async function run(
       tag.title = '';
     }
 
+    // Combine Filename Parsing into standard mode if artist or title are missing, or if force flag is set
+    if (!tag.artist || !tag.title || force) {
+      const parsed = parseFilename(file);
+      if ((!tag.title || force) && parsed.title && hasUsefulMetadataValue(parsed.title)) {
+        tag.title = parsed.title;
+      }
+      if ((!tag.artist || force) && parsed.artist && hasUsefulMetadataValue(parsed.artist)) {
+        tag.artist = parsed.artist;
+      }
+    }
+
     if (tag.artist && tag.title) {
       if (checkDuplicate(tag.artist, tag.title)) return;
     }
@@ -451,6 +523,7 @@ async function run(
       !force &&
       !useRecognition &&
       !useOpenAIRecognition &&
+      !useFilenameSearch &&
       tag.image &&
       tag.artist &&
       tag.album
@@ -465,7 +538,10 @@ async function run(
 
     log.info(`(${i + 1}/${files.length}) Processing: ${file}`);
 
-    if (!tag.artist || !tag.title || useRecognition || useOpenAIRecognition) {
+    let parsedTitle: string | null = null;
+    let parsedArtist: string | null = null;
+
+    if (!tag.artist || !tag.title || !tag.album || force || useRecognition || useOpenAIRecognition || useFilenameSearch) {
       let webMetadata = null;
 
       if (useOpenAIRecognition) {
@@ -492,17 +568,19 @@ async function run(
         }
       }
 
-      if (!webMetadata && !tag.artist) {
-        log.info('Missing metadata, attempting to fetch from filename');
+      if (!webMetadata && (!tag.artist || !tag.album || force || useFilenameSearch)) {
+        log.info('Attempting to fetch metadata from filename/ID3 tags');
         const parsed = parseFilename(file);
-        const parsedArtist = hasUsefulMetadataValue(parsed.artist || undefined)
-          ? parsed.artist
-          : null;
-        const parsedTitle = hasUsefulMetadataValue(parsed.title || undefined) ? parsed.title : null;
+        parsedArtist = force
+          ? (hasUsefulMetadataValue(parsed.artist || undefined) ? parsed.artist : tag.artist || null)
+          : (tag.artist || (hasUsefulMetadataValue(parsed.artist || undefined) ? parsed.artist : null));
+        parsedTitle = force
+          ? (hasUsefulMetadataValue(parsed.title || undefined) ? parsed.title : tag.title || null)
+          : (tag.title || (hasUsefulMetadataValue(parsed.title || undefined) ? parsed.title : null));
 
         if (parsedTitle) {
           log.info(
-            `Searching MusicBrainz for: ${parsedArtist ? parsedArtist + ' - ' : ''}${parsedTitle}`,
+            `Searching MusicBrainz for: ${parsedTitle}${parsedArtist ? ' - ' + parsedArtist : ''}`,
           );
           webMetadata = await searchRecording(parsedArtist, parsedTitle);
 
@@ -536,12 +614,19 @@ async function run(
         if (tag.artist && tag.title) {
           if (checkDuplicate(tag.artist, tag.title)) return;
         }
+      } else if (force && (parsedTitle || parsedArtist)) {
+        log.info(`Updating ID3 tags directly from filename: ${parsedTitle} - ${parsedArtist}`);
+        writeTags(file, {
+          artist: parsedArtist || undefined,
+          title: parsedTitle || undefined,
+        });
+        tag = readTag(file);
       } else if (useRecognition) {
         log.warn('Audio recognition failed');
       }
     }
 
-    if (!tag.artist || !tag.album) {
+    if ((!tag.artist || !tag.album) && !useOpenAICover) {
       log.warn('Still missing metadata, skipping cover search');
       unknownArtistFiles.add(file);
       if (rename && tag.artist && tag.title) {
@@ -560,7 +645,18 @@ async function run(
       return;
     }
 
-    const coverPath = await resolveCover(tag.artist, tag.album);
+    const { coverPath, resolvedAlbum } = await resolveCover(tag.artist || '', tag.album || '', {
+      title: tag.title || undefined,
+      useOpenAICover,
+      openaiKey,
+    });
+
+    if (resolvedAlbum && resolvedAlbum !== tag.album) {
+      log.info(`Updating ID3 album tag to: "${resolvedAlbum}"`);
+      writeTags(file, { album: resolvedAlbum });
+      tag = readTag(file);
+    }
+
     if (!coverPath) {
       log.warn('No cover found');
       if (rename && tag.artist && tag.title) {
@@ -580,7 +676,22 @@ async function run(
     processedFiles.add(file);
   });
 
-  await queue.addAll(tasks);
+  const taskErrors: unknown[] = [];
+  let nextTaskIndex = 0;
+  const workerCount = Math.min(concurrency, tasks.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextTaskIndex < tasks.length) {
+        const task = tasks[nextTaskIndex++];
+        try {
+          await task();
+        } catch (error) {
+          taskErrors.push(error);
+        }
+      }
+    }),
+  );
+  if (taskErrors.length > 0) throw taskErrors[0];
 }
 
 async function main() {
@@ -589,6 +700,8 @@ async function main() {
     target,
     useRecognition,
     useOpenAIRecognition,
+    useOpenAICover,
+    useFilenameSearch,
     openaiKey,
     force,
     rename,
@@ -596,6 +709,7 @@ async function main() {
     dedupStandaloneDelete,
     dedupStandaloneMove,
     concurrency,
+    country,
   } = await getCliOptions(args);
 
   const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
@@ -610,6 +724,13 @@ async function main() {
     );
   }
 
+  if (country && country !== 'US') {
+    log.info(`iTunes store country: ${country}`);
+  }
+
+  if (useFilenameSearch) {
+    log.info('Running in Filename Search mode (Parsing artist/title from filename -> MusicBrainz/iTunes search)');
+  }
   if (useOpenAIRecognition) {
     log.info(
       'Running in OpenAI recognition mode (Whisper audio transcription -> Web lyric search)',
@@ -632,7 +753,8 @@ async function main() {
     log.info('Standalone dedup enabled: duplicates will be logged to duplicates.txt and skipped');
   }
 
-  while (true) {
+  let attempts = 0;
+  while (attempts < 2) {
     try {
       unknownArtistFiles.clear();
       await run(
@@ -642,6 +764,8 @@ async function main() {
         target,
         useRecognition,
         useOpenAIRecognition,
+        useOpenAICover,
+        useFilenameSearch,
         openaiKey,
         force,
         rename,
@@ -652,7 +776,9 @@ async function main() {
       );
       break; // Exit loop if run() completes successfully
     } catch (err) {
+      attempts++;
       log.error(`Fatal error: ${String(err)}`);
+      if (attempts >= 2) throw err;
       log.info(`Restarting process in 5 minutes...`);
       await new Promise((resolve) => setTimeout(resolve, COOLDOWN_MS));
     }
@@ -677,4 +803,7 @@ async function main() {
   }
 }
 
-main().catch((err) => log.error(String(err)));
+main().catch((err) => {
+  log.error(String(err));
+  process.exitCode = 1;
+});

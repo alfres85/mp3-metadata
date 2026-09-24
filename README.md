@@ -3,7 +3,7 @@
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
 ![Language](https://img.shields.io/badge/language-Typescript-blue)
 ![License](https://img.shields.io/badge/license-MIT-purple)
-![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-green)
+![Node](https://img.shields.io/badge/node-%3E%3D20.9.0-green)
 
 A Node/TypeScript tool that scans folders, detects MP3 files without covers, extracts ID3 information, fetches the correct artwork using a robust pipeline (**MusicBrainz → iTunes → DuckDuckGo**), and embeds it directly into the file. It also attempts to fetch missing metadata (Artist, Album, Title) from the web based on the filename if the ID3 tags are empty.
 
@@ -76,6 +76,13 @@ npm start
 
 This executes: `node dist/index.js`
 
+### **Command Generator Web GUI**
+
+```bash
+npm run gui
+```
+Or double click `index.html` in the root folder to open the interactive command builder interface in your browser.
+
 ---
 
 ## ▶️ Usage
@@ -90,20 +97,21 @@ If no parameter is provided, the tool starts an interactive console setup where 
 
 ### **Advanced features (Parameters)**
 
-The tool supports several flags to customize its behavior:
-
 | Flag                 | Alias           | Description                                                                                                                                                                                                       |
 | :------------------- | :-------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--from-filename`   | `--by-filename` | **Filename Search**: Parses track `Title - Artist` from the MP3 filename and searches MusicBrainz / iTunes for accurate metadata & album cover art (now automatically included in Standard Mode). |
 | `--openai-recon`     | `--use-openai`  | **OpenAI Recognition**: Extracts an audio snippet, transcribes lyrics using OpenAI's Whisper API (`whisper-1`), and searches web sources (iTunes / MusicBrainz) to resolve `Artist - Title` & album metadata. |
+| `--use-openai-cover` | `--openai-cover` | **OpenAI Cover Search**: Resolves album name & cover art via OpenAI from `Artist` & `Title` metadata. Writes resolved album tag; if direct cover download fails, uses the newly resolved album name to fetch artwork from existing services (MusicBrainz / iTunes / DuckDuckGo). |
 | `--openai-key <key>` | `--key`, `-k`   | **OpenAI API Key**: Pass your OpenAI API key directly via CLI (or `--key <key>`, `-k <key>`, `--openai-key=<key>`). |
 | `--acoustid-key <key>`| `-acoustid-key` | **AcoustID API Key**: Pass your AcoustID API key directly via CLI. |
 | `--acrcloud-key <key>`| `-acrcloud-key` | **ACRCloud Access Key**: Pass your ACRCloud access key directly via CLI. |
 | `--acrcloud-secret <sec>`| `-acrcloud-secret` | **ACRCloud Access Secret**: Pass your ACRCloud access secret directly via CLI. |
 | `--recognize`        | `-recognize`    | **Audio Recognition**: Uses Shazam API via a Node/WASM wrapper first, then [ACRCloud](https://www.acrcloud.com/), then **AcoustID** (Chromaprint fingerprinting), then filename parsing. |
-| `--force`            | `-force`        | **Force Mode**: Re-processes files even if they already have embedded cover art. Useful for replacing low-quality covers.                                                                                         |
+| `--force`            | `-force`        | **Force Mode**: Re-processes files even if they already have embedded cover art. Parses track `Title - Artist` from filename to replace existing ID3 metadata & fetch fresh artwork. |
 | `--rename`       | `-rename`    | **Auto Rename**: Renames the file to `Title - Artist.mp3` after resolving metadata. Cleans illegal characters.                                                                                                    |
 | `--interactive`  | `-interactive` | **Interactive Mode**: Opens a console setup to choose the target folder, action mode, force/rename options, and concurrency. Also starts automatically when no parameters are provided. |
 | `--concurrency <num>` | `-concurrency <num>` | **Concurrency**: Number of files to process simultaneously. Defaults to `3`. Increase to `4` or `5` on fast networks for a speed boost. |
+| `--country <code>`   | `--itunes-country` | **iTunes Store Country**: Two-letter ISO country code storefront for iTunes Search API queries (e.g. `US`, `GB`, `JP`, `DE`, `ES`, `CA`). Defaults to `US`. Can also be set via `ITUNES_COUNTRY` environment variable. |
 | `--dedup-standalone-log`    | `-dedup-standalone-log` | **Standalone Dedup (Log)**: Fast standalone pass that only checks for duplicate tracks based on local ID3 metadata. Skips all cover/metadata fetching. Logs duplicates to `duplicates.txt`. |
 | `--dedup-standalone-delete` | `-dedup-standalone-delete` | **Standalone Dedup (Delete)**: Same fast standalone pass, but permanently **deletes** duplicate files. The first copy encountered is always kept. Logs deletions to `duplicates.txt`. Use with caution. |
 | `--dedup-standalone-move`   | `-dedup-standalone-move` | **Standalone Dedup (Move)**: Same fast standalone pass, but **moves** duplicates into a `duplicates/` subfolder inside your target directory instead of deleting them. When duplicate filenames differ only by a trailing number like `(1)`, the unnumbered filename is kept in the main folder. Logs moves to `duplicates.txt`. |

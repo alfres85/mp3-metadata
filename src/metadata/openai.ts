@@ -10,6 +10,7 @@ import type { ACRCloudMetadata } from './acrcloud.js';
 import { isUsableMetadata } from './metadataValidation.js';
 import { searchRecording } from '../cover/musicbrainz.js';
 import { searchiTunesMetadata } from '../cover/itunes.js';
+import { searchDuckDuckGoImage } from '../cover/duckduckgo.js';
 import { requestWithRetry } from '../utils/http.js';
 
 function createAudioSnippet(
@@ -170,6 +171,7 @@ export async function transcribeAudioSnippet(
             Authorization: `Bearer ${token}`,
             'Content-Type': 'multipart/form-data',
           },
+          timeout: 60000,
         },
       );
 
@@ -226,6 +228,7 @@ export async function identifySongWithOpenAI(
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
+        timeout: 30000,
       },
     );
 
@@ -329,16 +332,10 @@ export async function recognizeFromOpenAI(
     return null;
   }
 
-  // 1. AudD Lyrics Search
-  let songCandidate = null; //await searchAudDByLyrics(transcript, auddKey);
+  // 1. lyrics.ovh Search
+  let songCandidate = await searchLyricsOvh(transcript);
 
-  // 2. lyrics.ovh Search
-  if (!songCandidate) {
-    log.info('AudD search returned no match. Falling back to lyrics.ovh...');
-    songCandidate = await searchLyricsOvh(transcript);
-  }
-
-  // 3. OpenAI Chat & Web Search Fallbacks
+  // 2. OpenAI Chat & Web Search Fallbacks
   if (!songCandidate) {
     log.info('lyrics.ovh returned no match. Falling back to OpenAI Chat identification...');
     songCandidate = await identifySongWithOpenAI(transcript, apiKey);
@@ -408,4 +405,131 @@ export async function recognizeFromOpenAI(
 
   log.warn('Could not identify song metadata from transcribed audio lyrics.');
   return null;
+}
+
+/**
+ * Domains that require auth/tokens and cannot be fetched directly.
+ * Spotify CDN links (i.scdn.co) always return 404 without a valid Spotify access token.
+ */
+const BLOCKED_IMAGE_DOMAINS = ['i.scdn.co', 'scdn.co', 'open.spotify.com'];
+
+function isBlockedImageUrl(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return BLOCKED_IMAGE_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+  } catch {
+    return false;
+  }
+}
+
+async function downloadImageBuffer(url: string): Promise<Buffer | null> {
+  if (isBlockedImageUrl(url)) {
+    log.info(`Skipping blocked image domain (requires auth): ${url}`);
+    return null;
+  }
+
+  try {
+    const res = await axios.get(url, {
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      timeout: 8000,
+    });
+    if (res.status === 200 && res.data) {
+      return Buffer.from(res.data);
+    }
+  } catch (err: any) {
+    const status = err.response?.status ? `HTTP ${err.response.status}` : String(err.message || err);
+    log.warn(`Failed to download cover image from ${url}: ${String(err.message || err)}`);
+    log.info(`Direct cover URL download unavailable (${status}). Will use iTunes/CoverArtArchive/DuckDuckGo services.`);
+  }
+  return null;
+}
+
+export interface OpenAIAlbumAndCoverResult {
+  album: string | null;
+  coverBuffer: Buffer | null;
+}
+
+export async function fetchAlbumAndCoverWithOpenAI(
+  artist: string,
+  title: string,
+  apiKey?: string,
+): Promise<OpenAIAlbumAndCoverResult> {
+  const token = apiKey || process.env.OPENAI_API_KEY;
+  if (!token) {
+    log.warn('Missing OpenAI API Key (OPENAI_API_KEY). Skipping OpenAI album search.');
+    return { album: null, coverBuffer: null };
+  }
+
+  const querySubject = [title, artist].filter(Boolean).join(' - ') || 'Music Track';
+
+  log.info(`Searching OpenAI for official album name of: "${querySubject}"`);
+  let album: string | null = null;
+  let coverBuffer: Buffer | null = null;
+
+  try {
+    const prompt = `You are a music metadata expert. For the song "${title || ''}" by "${artist || ''}", identify:
+1. The exact official album name (or single release name if not on an LP/EP).
+2. Optionally, if you know a PUBLICLY ACCESSIBLE direct static cover image URL (e.g. from coverartarchive.org, archive.org, wikimedia.org, or mzstatic.com), include it in "imageUrl".
+   IMPORTANT: Do NOT return Spotify URLs (i.scdn.co or open.spotify.com) — they require authentication and will fail.
+   Do NOT generate fictional/hallucinated hash links. Only include a URL if you are confident it is real and publicly accessible.
+
+Respond ONLY with a JSON object:
+{"album": "Official Album Name", "imageUrl": "https://..."} or {"album": "Official Album Name", "imageUrl": null}.`;
+
+    const response = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'You output valid JSON only.' },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.1,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 30000,
+      },
+    );
+
+    const content = response.data?.choices?.[0]?.message?.content?.trim();
+    let imageUrl: string | null = null;
+
+    if (content) {
+      const cleaned = content.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim();
+      try {
+        const parsed = JSON.parse(cleaned);
+        if (parsed.album && typeof parsed.album === 'string' && parsed.album.trim()) {
+          album = parsed.album.trim();
+          log.success(`OpenAI resolved album name: "${album}"`);
+        }
+        if (parsed.imageUrl && typeof parsed.imageUrl === 'string' && parsed.imageUrl.startsWith('http')) {
+          imageUrl = parsed.imageUrl.trim();
+        }
+      } catch {
+        // ignore parse error
+      }
+    }
+
+    if (imageUrl) {
+      coverBuffer = await downloadImageBuffer(imageUrl);
+      if (coverBuffer && coverBuffer.length > 5000) {
+        log.success('Successfully downloaded album cover from OpenAI suggested URL!');
+      } else {
+        coverBuffer = null;
+      }
+    }
+  } catch (err: any) {
+    const errorMsg = err.response?.data?.error?.message || err.message;
+    log.warn(`OpenAI album search failed: ${errorMsg}`);
+  }
+
+  return { album, coverBuffer };
 }

@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MP3 Metadata CLI Command Generator</title>
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./GUI/style.css" />
+  </head>
+  <body>
+    <div class="app-container">
+      <!-- Header -->
+      <header class="app-header">
+        <div class="logo-area">
+          <div class="logo-icon">🎵</div>
+          <div>
+            <h1>MP3 Auto Tag CLI Generator</h1>
+            <p class="subtitle">
+              Configure settings, API keys, flags, and generate ready-to-run console commands
+            </p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button id="btn-reset" class="btn btn-outline" title="Reset all settings to default">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+            Reset Defaults
+          </button>
+        </div>
+      </header>
+
+      <!-- Quick Presets Carousel -->
+      <section class="presets-section">
+        <div class="section-title-sm">⚡ Quick Presets</div>
+        <div class="preset-pills">
+          <button class="preset-btn" data-preset="full-auto">
+            🚀 Full Auto (Recognize + Force + Rename)
+          </button>
+          <button class="preset-btn" data-preset="quick-force">🖼️ Force Update Covers</button>
+          <button class="preset-btn" data-preset="acr-acoustid">
+            🎧 ACRCloud + AcoustID Audio Scan
+          </button>
+          <button class="preset-btn" data-preset="whisper">🤖 OpenAI Whisper AI Recognition</button>
+          <button class="preset-btn" data-preset="dedup-move">
+            📁 Deduplicate & Move Duplicates
+          </button>
+          <button class="preset-btn" data-preset="interactive">💬 Interactive Prompt Mode</button>
+        </div>
+      </section>
+
+      <!-- Main Grid Layout -->
+      <div class="main-grid">
+        <!-- Left Column: Controls & Configuration -->
+        <div class="config-column">
+          <!-- Card 1: Target Shell & Launcher -->
+          <div class="card">
+            <div class="card-header">
+              <h2>1. Shell & Environment Target</h2>
+              <span class="badge">OS & Terminal</span>
+            </div>
+            <div class="card-body">
+              <div class="form-row grid-2">
+                <div class="form-group">
+                  <label for="shell-type"
+                    >Terminal Shell
+                    <span
+                      class="info-icon"
+                      data-tooltip="Format environment variables according to your active shell system (PowerShell vs CMD vs Bash)"
+                      >?</span
+                    >
+                  </label>
+                  <select id="shell-type" class="form-control">
+                    <option value="pwsh">PowerShell ($env:KEY="VAL")</option>
+                    <option value="cmd">Windows CMD (set KEY=VAL && ...)</option>
+                    <option value="bash">Bash / Zsh (Linux & macOS / Git Bash)</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="runner-cmd"
+                    >Command Launcher
+                    <span
+                      class="info-icon"
+                      data-tooltip="Choose whether to run compiled JavaScript (dist/index.js) or source TypeScript via tsx or npm"
+                      >?</span
+                    >
+                  </label>
+                  <select id="runner-cmd" class="form-control">
+                    <option value="node dist/index.js">
+                      node dist/index.js (Production Build)
+                    </option>
+                    <option value="npm start --">npm start -- (Npm Script)</option>
+                    <option value="npx tsx index.ts">npx tsx index.ts (Direct TS execution)</option>
+                    <option value="npm run dev --">npm run dev -- (Development mode)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-group mt-2">
+                <label for="format-style">Command Output Style</label>
+                <div class="segmented-control">
+                  <button class="segmented-btn active" data-style="single">
+                    Single Line (Copy & Paste)
+                  </button>
+                  <button class="segmented-btn" data-style="multiline">Multi-line Script</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 2: Target Directory -->
+          <div class="card">
+            <div class="card-header">
+              <h2>2. Target Folder</h2>
+              <span class="badge badge-accent">Directory</span>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label for="target-folder"
+                  >Target Folder Path
+                  <span
+                    class="info-icon"
+                    data-tooltip="Relative or absolute path to the directory containing your MP3 files. Subfolders will be scanned recursively."
+                    >?</span
+                  >
+                </label>
+                <div class="input-with-button">
+                  <input
+                    type="text"
+                    id="target-folder"
+                    class="form-control"
+                    value="./process"
+                    placeholder="./process or C:\Music"
+                  />
+                </div>
+                <div class="path-suggestions">
+                  <span class="path-label">Quick Suggestions:</span>
+                  <button class="path-chip" data-path="./process">./process</button>
+                  <button class="path-chip" data-path="./music">./music</button>
+                  <button class="path-chip" data-path=".">. (Current Dir)</button>
+                  <button class="path-chip" data-path="./songs">./songs</button>
+                </div>
+                <div class="help-box">
+                  💡 <strong>Folder Help:</strong> Target folder will be recursively scanned for
+                  <code>.mp3</code> files without artwork or missing metadata. Use
+                  <code>./process</code> for local process folder or double-quoted absolute paths
+                  like <code>"D:\My Music"</code> if paths contain spaces.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 3: Action Modes & Operations -->
+          <div class="card">
+            <div class="card-header">
+              <h2>3. Operation Mode</h2>
+              <span class="badge">Pipeline Strategy</span>
+            </div>
+            <div class="card-body">
+              <div class="radio-cards">
+                <label class="radio-card active">
+                  <input type="radio" name="operation-mode" value="standard" checked />
+                  <div class="radio-card-content">
+                    <div class="radio-title">🔍 Standard Auto Tag & Cover</div>
+                    <div class="radio-desc">
+                      Scans ID3 tags & parses <code>Title - Artist</code> from filenames when tags
+                      are missing, then searches MusicBrainz & iTunes for artwork & tags.
+                    </div>
+                  </div>
+                </label>
+
+                <label class="radio-card">
+                  <input type="radio" name="operation-mode" value="recognize" />
+                  <div class="radio-card-content">
+                    <div class="radio-title">
+                      🎧 Audio Fingerprinting Recognition (<code>--recognize</code>)
+                    </div>
+                    <div class="radio-desc">
+                      Analyzes actual audio content via Shazam API, ACRCloud, and AcoustID
+                      fingerprinting (fpcalc) to identify songs accurately.
+                    </div>
+                  </div>
+                </label>
+
+                <label class="radio-card">
+                  <input type="radio" name="operation-mode" value="openai" />
+                  <div class="radio-card-content">
+                    <div class="radio-title">
+                      🤖 OpenAI Whisper Lyrics Recognition (<code>--openai-recon</code>)
+                    </div>
+                    <div class="radio-desc">
+                      Transcribes song lyrics via OpenAI Whisper API (`whisper-1`) and web-searches
+                      artist/title details.
+                    </div>
+                  </div>
+                </label>
+
+                <label class="radio-card">
+                  <input type="radio" name="operation-mode" value="filename" />
+                  <div class="radio-card-content">
+                    <div class="radio-title">
+                      🏷️ Filename Metadata Parser (<code>--from-filename</code>)
+                    </div>
+                    <div class="radio-desc">
+                      Forces metadata resolution strictly from filename (e.g.
+                      <code>Title - Artist.mp3</code>) before querying MusicBrainz & iTunes.
+                    </div>
+                  </div>
+                </label>
+
+                <label class="radio-card">
+                  <input type="radio" name="operation-mode" value="dedup-log" />
+                  <div class="radio-card-content">
+                    <div class="radio-title">
+                      📄 Deduplicate: Log Only (<code>--dedup-standalone-log</code>)
+                    </div>
+                    <div class="radio-desc">
+                      Fast standalone check for duplicate tracks based on local metadata. Logs
+                      findings to <code>duplicates.txt</code>.
+                    </div>
+                  </div>
+                </label>
+
+                <label class="radio-card">
+                  <input type="radio" name="operation-mode" value="dedup-move" />
+                  <div class="radio-card-content">
+                    <div class="radio-title">
+                      📦 Deduplicate: Move Duplicates (<code>--dedup-standalone-move</code>)
+                    </div>
+                    <div class="radio-desc">
+                      Moves duplicates into a <code>duplicates/</code> subfolder while preserving
+                      original main copy.
+                    </div>
+                  </div>
+                </label>
+
+                <label class="radio-card">
+                  <input type="radio" name="operation-mode" value="dedup-delete" />
+                  <div class="radio-card-content">
+                    <div class="radio-title">
+                      ⚠️ Deduplicate: Permanent Delete (<code>--dedup-standalone-delete</code>)
+                    </div>
+                    <div class="radio-desc">
+                      Permanently deletes duplicate audio files keeping the cleanest original file.
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 4: Execution Flags & Modifiers -->
+          <div class="card">
+            <div class="card-header">
+              <h2>4. Options & Flags</h2>
+              <span class="badge">Modifiers</span>
+            </div>
+            <div class="card-body">
+              <div class="toggle-list">
+                <label class="toggle-item">
+                  <div class="toggle-info">
+                    <span class="toggle-title">⚡ Force Re-process (<code>--force</code>)</span>
+                    <span class="toggle-desc"
+                      >Re-downloads covers and replaces ID3 metadata from filename (<code
+                        >Title - Artist</code
+                      >) even if artwork already exists.</span
+                    >
+                  </div>
+                  <div class="switch">
+                    <input type="checkbox" id="flag-force" />
+                    <span class="slider"></span>
+                  </div>
+                </label>
+
+                <label class="toggle-item">
+                  <div class="toggle-info">
+                    <span class="toggle-title"
+                      >🎨 OpenAI Cover Web Search (<code>--use-openai-cover</code>)</span
+                    >
+                    <span class="toggle-desc"
+                      >Overrides standard API cover search and uses OpenAI web search to find and
+                      download official album cover art.</span
+                    >
+                  </div>
+                  <div class="switch">
+                    <input type="checkbox" id="flag-openaicover" />
+                    <span class="slider"></span>
+                  </div>
+                </label>
+
+                <label class="toggle-item">
+                  <div class="toggle-info">
+                    <span class="toggle-title">🏷️ Auto Rename Files (<code>--rename</code>)</span>
+                    <span class="toggle-desc"
+                      >Renames audio files to standardized <code>Title - Artist.mp3</code> format,
+                      sanitizing invalid file characters automatically.</span
+                    >
+                  </div>
+                  <div class="switch">
+                    <input type="checkbox" id="flag-rename" />
+                    <span class="slider"></span>
+                  </div>
+                </label>
+
+                <label class="toggle-item">
+                  <div class="toggle-info">
+                    <span class="toggle-title"
+                      >💬 Interactive Mode (<code>--interactive</code>)</span
+                    >
+                    <span class="toggle-desc"
+                      >Forces terminal interactive prompt wizard on startup to pick folders and
+                      flags manually.</span
+                    >
+                  </div>
+                  <div class="switch">
+                    <input type="checkbox" id="flag-interactive" />
+                    <span class="slider"></span>
+                  </div>
+                </label>
+              </div>
+
+              <!-- iTunes Store Country & Concurrency Row -->
+              <div class="form-row grid-2 mt-3">
+                <!-- iTunes Store Country Selector -->
+                <div class="form-group">
+                  <label for="country-select"
+                    >iTunes Country (<code>--country</code>)
+                    <span
+                      class="info-icon"
+                      data-tooltip="Two-letter ISO country storefront for the iTunes Search API (e.g. US, GB, JP, DE, ES, CA). Defaults to US."
+                      >?</span
+                    >
+                  </label>
+                  <select id="country-select" class="form-control">
+                    <optgroup label="Popular Regions">
+                      <option value="US" selected>🇺🇸 United States (US) — Default</option>
+                      <option value="AR">🇦🇷 Argentina (AR)</option>
+                      <option value="GB">🇬🇧 United Kingdom (GB)</option>
+                      <option value="CA">🇨🇦 Canada (CA)</option>
+                      <option value="AU">🇦🇺 Australia (AU)</option>
+                      <option value="DE">🇩🇪 Germany (DE)</option>
+                      <option value="FR">🇫🇷 France (FR)</option>
+                      <option value="ES">🇪🇸 Spain (ES)</option>
+                      <option value="IT">🇮🇹 Italy (IT)</option>
+                      <option value="JP">🇯🇵 Japan (JP)</option>
+                      <option value="BR">🇧🇷 Brazil (BR)</option>
+                      <option value="MX">🇲🇽 Mexico (MX)</option>
+                    </optgroup>
+                    <optgroup label="Europe">
+                      <option value="NL">🇳🇱 Netherlands (NL)</option>
+                      <option value="SE">🇸🇪 Sweden (SE)</option>
+                      <option value="NO">🇳🇴 Norway (NO)</option>
+                      <option value="DK">🇩🇰 Denmark (DK)</option>
+                      <option value="FI">🇫🇮 Finland (FI)</option>
+                      <option value="PL">🇵🇱 Poland (PL)</option>
+                      <option value="PT">🇵🇹 Portugal (PT)</option>
+                      <option value="IE">🇮🇪 Ireland (IE)</option>
+                      <option value="AT">🇦🇹 Austria (AT)</option>
+                      <option value="CH">🇨🇭 Switzerland (CH)</option>
+                      <option value="BE">🇧🇪 Belgium (BE)</option>
+                      <option value="CZ">🇨🇿 Czechia (CZ)</option>
+                      <option value="GR">🇬🇷 Greece (GR)</option>
+                      <option value="HU">🇭🇺 Hungary (HU)</option>
+                      <option value="RO">🇷🇴 Romania (RO)</option>
+                      <option value="TR">🇹🇷 Turkey (TR)</option>
+                      <option value="UA">🇺🇦 Ukraine (UA)</option>
+                    </optgroup>
+                    <optgroup label="Americas">
+                      <option value="CL">🇨🇱 Chile (CL)</option>
+                      <option value="CO">🇨🇴 Colombia (CO)</option>
+                      <option value="PE">🇵🇪 Peru (PE)</option>
+                    </optgroup>
+                    <optgroup label="Asia & Pacific">
+                      <option value="KR">🇰🇷 South Korea (KR)</option>
+                      <option value="CN">🇨🇳 China (CN)</option>
+                      <option value="TW">🇹🇼 Taiwan (TW)</option>
+                      <option value="HK">🇭🇰 Hong Kong (HK)</option>
+                      <option value="IN">🇮🇳 India (IN)</option>
+                      <option value="ID">🇮🇩 Indonesia (ID)</option>
+                      <option value="TH">🇹🇭 Thailand (TH)</option>
+                      <option value="PH">🇵🇭 Philippines (PH)</option>
+                      <option value="MY">🇲🇾 Malaysia (MY)</option>
+                      <option value="SG">🇸🇬 Singapore (SG)</option>
+                      <option value="NZ">🇳🇿 New Zealand (NZ)</option>
+                    </optgroup>
+                    <optgroup label="Middle East & Africa">
+                      <option value="IL">🇮🇱 Israel (IL)</option>
+                      <option value="AE">🇦🇪 United Arab Emirates (AE)</option>
+                      <option value="SA">🇸🇦 Saudi Arabia (SA)</option>
+                      <option value="ZA">🇿🇦 South Africa (ZA)</option>
+                      <option value="NG">🇳🇬 Nigeria (NG)</option>
+                      <option value="EG">🇪🇬 Egypt (EG)</option>
+                    </optgroup>
+                    <optgroup label="Custom">
+                      <option value="CUSTOM">🌐 Custom ISO 3166-1 Code...</option>
+                    </optgroup>
+                  </select>
+                  <div id="custom-country-group" class="hidden mt-1">
+                    <input
+                      type="text"
+                      id="custom-country-input"
+                      class="form-control"
+                      maxlength="2"
+                      placeholder="e.g. IS, IS, PE (2-letter code)"
+                      style="text-transform: uppercase"
+                    />
+                  </div>
+                  <label class="sub-checkbox mt-1">
+                    <input type="checkbox" id="country-explicit" />
+                    <span>Explicit flag (include <code>--country US</code> when default)</span>
+                  </label>
+                </div>
+
+                <!-- Concurrency Slider -->
+                <div class="form-group">
+                  <div class="slider-label-row">
+                    <label for="concurrency-range"
+                      >Parallel Concurrency (<code>--concurrency</code>)
+                      <span
+                        class="info-icon"
+                        data-tooltip="Number of files to process in parallel. Defaults to 3. Increase on high-speed internet."
+                        >?</span
+                      >
+                    </label>
+                    <span id="concurrency-val" class="value-badge">3</span>
+                  </div>
+                  <input
+                    type="range"
+                    id="concurrency-range"
+                    min="1"
+                    max="10"
+                    value="3"
+                    class="form-range"
+                  />
+                  <div class="field-hint">Files processed concurrently</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 5: API Keys & Tokens -->
+          <div class="card">
+            <div class="card-header">
+              <h2>5. API Credentials & Tokens</h2>
+              <span class="badge badge-warning">Environment Keys</span>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label>Credentials Export Mode</label>
+                <div class="segmented-control">
+                  <button class="segmented-btn active" data-keymode="env">
+                    Environment Variables ($env:KEY=...)
+                  </button>
+                  <button class="segmented-btn" data-keymode="cli">CLI Flags (--key=...)</button>
+                </div>
+              </div>
+
+              <!-- OpenAI Key -->
+              <div class="form-group">
+                <label for="key-openai"
+                  >OpenAI API Key
+                  <span
+                    class="info-icon"
+                    data-tooltip="Required for --openai-recon. Used by Whisper API for transcribing song snippets to lyrics."
+                    >?</span
+                  >
+                </label>
+                <div class="input-with-eye">
+                  <input
+                    type="password"
+                    id="key-openai"
+                    class="form-control key-input"
+                    placeholder="sk-proj-..."
+                    autocomplete="off"
+                  />
+                  <button class="btn-toggle-eye" data-target="key-openai" title="Show/Hide Key">
+                    👁️
+                  </button>
+                </div>
+                <div class="field-hint">
+                  Used for <code>OPENAI_API_KEY</code> or <code>--openai-key</code>.
+                  <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener"
+                    >Get OpenAI key ↗</a
+                  >
+                </div>
+              </div>
+
+              <!-- ACRCloud Credentials -->
+              <div class="form-row grid-2">
+                <div class="form-group">
+                  <label for="key-acr-access"
+                    >ACRCloud Access Key
+                    <span
+                      class="info-icon"
+                      data-tooltip="Used during --recognize to perform fast cloud audio fingerprint matching via ACRCloud service."
+                      >?</span
+                    >
+                  </label>
+                  <div class="input-with-eye">
+                    <input
+                      type="password"
+                      id="key-acr-access"
+                      class="form-control key-input"
+                      placeholder="ACRCloud Key"
+                      autocomplete="off"
+                    />
+                    <button
+                      class="btn-toggle-eye"
+                      data-target="key-acr-access"
+                      title="Show/Hide Key"
+                    >
+                      👁️
+                    </button>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="key-acr-secret"
+                    >ACRCloud Access Secret
+                    <span
+                      class="info-icon"
+                      data-tooltip="ACRCloud API secret key token associated with your access key."
+                      >?</span
+                    >
+                  </label>
+                  <div class="input-with-eye">
+                    <input
+                      type="password"
+                      id="key-acr-secret"
+                      class="form-control key-input"
+                      placeholder="ACRCloud Secret"
+                      autocomplete="off"
+                    />
+                    <button
+                      class="btn-toggle-eye"
+                      data-target="key-acr-secret"
+                      title="Show/Hide Secret"
+                    >
+                      👁️
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="key-acr-host"
+                  >ACRCloud Host (Optional)
+                  <span
+                    class="info-icon"
+                    data-tooltip="Custom ACRCloud API endpoint host if using a non-default region host."
+                    >?</span
+                  >
+                </label>
+                <input
+                  type="text"
+                  id="key-acr-host"
+                  class="form-control"
+                  placeholder="identify-us-west-2.acrcloud.com (Optional)"
+                />
+                <div class="field-hint">
+                  Required for ACRCloud recognition fallback.
+                  <a href="https://www.acrcloud.com/" target="_blank" rel="noopener"
+                    >ACRCloud Console ↗</a
+                  >
+                </div>
+              </div>
+
+              <!-- AcoustID Key -->
+              <div class="form-group">
+                <label for="key-acoustid"
+                  >AcoustID API Key
+                  <span
+                    class="info-icon"
+                    data-tooltip="Used with local fpcalc tool for Chromaprint fingerprint lookup against AcoustID database."
+                    >?</span
+                  >
+                </label>
+                <div class="input-with-eye">
+                  <input
+                    type="password"
+                    id="key-acoustid"
+                    class="form-control key-input"
+                    placeholder="AcoustID Client Key"
+                    autocomplete="off"
+                  />
+                  <button class="btn-toggle-eye" data-target="key-acoustid" title="Show/Hide Key">
+                    👁️
+                  </button>
+                </div>
+                <div class="field-hint">
+                  Used for <code>ACOUSTID_API_KEY</code> or <code>--acoustid-key</code>.
+                  <a href="https://acoustid.org/api-key" target="_blank" rel="noopener"
+                    >Get AcoustID API Key ↗</a
+                  >
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="key-lastfm"
+                  >Last.fm API Key / Token (Optional)
+                  <span
+                    class="info-icon"
+                    data-tooltip="Enables Last.fm album and track artwork lookup."
+                    >?</span
+                  >
+                </label>
+                <div class="input-with-eye">
+                  <input
+                    type="password"
+                    id="key-lastfm"
+                    class="form-control key-input"
+                    placeholder="Last.fm API Key"
+                    autocomplete="off"
+                  />
+                  <button
+                    type="button"
+                    class="btn-toggle-eye"
+                    data-target="key-lastfm"
+                    aria-label="Show Last.fm API Key"
+                    title="Show/Hide Key"
+                  >
+                    👁️
+                  </button>
+                </div>
+                <div class="field-hint">
+                  Added to the generated command as <code>LASTFM_API_KEY</code>. This credential is
+                  always exported as an environment variable.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Column: Live Output & Command Preview Sticky Panel -->
+        <div class="output-column">
+          <div class="card sticky-output">
+            <div class="card-header">
+              <h2>Generated Console Command</h2>
+              <div class="output-status"><span class="dot-indicator"></span> Ready</div>
+            </div>
+            <div class="card-body">
+              <div class="command-box-wrapper">
+                <div class="command-box-header">
+                  <span class="shell-badge" id="display-shell-label">PowerShell</span>
+                  <span class="char-count" id="cmd-length">0 chars</span>
+                </div>
+                <pre
+                  id="command-output"
+                  class="command-code"
+                ><code>$env:ACRCLOUD_ACCESS_KEY="MY_KEY"; node dist/index.js ./process</code></pre>
+              </div>
+
+              <div class="action-buttons">
+                <button id="btn-copy" class="btn btn-primary btn-lg">
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                  Copy Command
+                </button>
+              </div>
+
+              <!-- Toast alert -->
+              <div id="toast-msg" class="toast hidden">
+                <span class="toast-icon">✅</span> Command copied to clipboard!
+              </div>
+
+              <!-- Command Breakdown & Context -->
+              <div class="breakdown-box">
+                <h3>Command Breakdown</h3>
+                <ul id="breakdown-list" class="breakdown-list">
+                  <!-- Dynamically populated by JS -->
+                </ul>
+              </div>
+
+              <!-- How to Run Guide -->
+              <div class="guide-box">
+                <h3>💡 How to execute:</h3>
+                <ol>
+                  <li>
+                    Open your terminal (PowerShell, CMD, or Terminal/Bash) in the project directory.
+                  </li>
+                  <li>Click <strong>Copy Command</strong> above.</li>
+                  <li>
+                    Paste into your console (Right Click or <code>Ctrl+V</code> /
+                    <code>Cmd+V</code>) and press <kbd>Enter</kbd>.
+                  </li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="./GUI/app.js"></script>
+  </body>
+</html>

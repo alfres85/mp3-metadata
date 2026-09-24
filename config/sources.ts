@@ -3,4 +3,5 @@ export const SOURCES = {
   coverArtArchive: 'https://coverartarchive.org',
   duckDuckGo: 'https://duckduckgo.com',
   itunes: 'https://itunes.apple.com/search',
+  lastfm: 'https://ws.audioscrobbler.com/2.0/',
 };
